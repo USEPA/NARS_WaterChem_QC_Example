@@ -1,0 +1,1550 @@
+---
+title: "National Lakes Assessment 2022 Water Chemistry and Chlorophyll a Validation"
+subtitle: "Protocol and code for evaluating NLA 2022 lab water quality data for completeness, consistency, and quality"
+date: "`r Sys.Date()`"
+authors: "Amalia Handler and Karen Blocksom"
+format: 
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: true
+editor_options: 
+  chunk_output_type: console
+execute: 
+  warning: false
+  message: false
+editor: 
+  markdown: 
+    wrap: 72
+params:
+  outDir: "NA"
+  inDir_raw: "NA"
+  inDir_data: "NA"
+---
+
+## Purpose
+
+The purpose of this code and report is to provide an initial evaluation
+of National Lakes Assessment (NLA) water quality data. The data are
+inclusive of physical and chemical parameters as well as chlorophyll a
+that are analyzed in the lab, but will hereafter be referred to
+collectively as "water quality" data. The most recent data in the
+National Aquatic Resource Survey (NARS) database are pulled in and
+evaluated for completeness and consistency while also providing an
+initial data quality check. Additional background information and
+graphics for the water quality validation process are provided in the
+Appendix. This script is intended for use once all water chemistry
+samples have been analyzed for the purposes of identifying potential
+outliers or quality issues; however, this script may be used iteratively
+to confirm observations are no longer flagged once data revisions are
+implemented.
+
+In the sections below, the code identifies observations that are shown
+in the table that are flagged for potential completeness, consistency,
+or quality issues. In addition, the script generates a data table in
+`r paste0("NARS_WaterChem_QA/reports/NLA_Water_Chem_QA_Report_", Sys.Date())`
+called
+`r paste0("NLA22_WaterChem_ObservationsForReview_", Sys.Date(), ".csv")`
+that contains all flagged observations with additional columns for the
+reviewer to provide notes, list any actions required, and finally record
+any revisions to the observation.
+
+All code used to generate this report appear in the code chunks. These
+are included for transparency in the quality assurance process.
+
+```{r load packages}
+options(scipen=999)
+library(tidyverse)
+library(here)
+library(stringr)
+library(DT)
+library(cowplot)
+library(gridExtra)
+
+# outDir <- paste0(here::here(), "/reports/NLA_Water_Chem_QA_Report_", Sys.Date())
+
+```
+
+## Data Sources
+
+Water quality data is read in via tab-delimited files that are exported
+from the National Aquatic Resource Survey (NARS) database. These files
+are updated periodically when there are updates to the NARS database. As
+a result, these files are copied to the report directory to provide a
+record of the data used with a run of this script. The main source of
+data is the waterChem.tab file which contains all water quality data
+that is evaluated in the lab. The sample grid is used to provide
+information about whole samples that may be missing or to identify
+inconsistencies between the sample grid and water chemistry data. The
+sample profile data is used to fill in missing pH and conductivity data
+when not measured in the lab.
+
+```{r data sources, eval = T}
+# Read in water chemistry data
+rawData <- readr::read_tsv(paste0(params$inDir_data, "/nla22_waterChem.tab")) 
+
+# Read in profile data to fill in pH and conductivity where missing in lab data
+profile_data <- readr::read_tsv(paste0(params$inDir_raw, "/nla2022_profile_wide.tab")) |>
+  filter(!is.na(PH)|!is.na(CONDUCTIVITY) & DEPTH<=2) |>
+  select(UID, SITE_ID, VISIT_NO, PSTL_CODE, PH, CONDUCTIVITY, PUBLICATION_DATE) |>
+  mutate(PH = as.numeric(PH))
+
+# Take the mean of all profile pH and conductivity data
+prof_means <- profile_data |>
+  group_by(UID, SITE_ID, VISIT_NO) |> 
+  summarise(PH = round(mean(PH, na.rm=T), 1), 
+              COND = round(mean(CONDUCTIVITY, na.rm=T), 1)) |> 
+  ungroup() |> 
+  # plyr::ddply(c('UID', 'SITE_ID', 'VISIT_NO'), 
+  #             summarise, PH = round(mean(PH, na.rm=T), 1), 
+  #             COND = round(mean(CONDUCTIVITY, na.rm=T), 1)) |>
+  pivot_longer(cols = PH:COND, names_to='ANALYTE', values_to='RESULT', values_drop_na=TRUE) |>
+  mutate(PUBLICATION_DATE = unique(profile_data$PUBLICATION_DATE))
+
+# Read in sample grid
+sampgrid <- readr::read_tsv(paste0(params$inDir_data, "/nla2022_sample_grid.tab"))
+
+# Find the date of publication for each file. This is the date that the data were last updated in the database.
+pubdate_chem <- unique(rawData$PUBLICATION_DATE)
+pubdate_prof <- unique(profile_data$PUBLICATION_DATE)
+pubdate_samp <- unique(sampgrid$PUBLICATION_DATE)
+
+# Create a date-stamped copy for use in QA process
+saveRDS(rawData, paste0(params$outDir, "/NLA22_WaterChem_", pubdate_chem, ".rds"))
+
+saveRDS(prof_means, paste0(params$outDir, "/NLA22_profile_meanCond_pH_", pubdate_prof, '.rds'))
+
+saveRDS(sampgrid, paste0(params$outDir, "/NLA22_Sample_Grid_", pubdate_samp, ".rds"))
+
+```
+
+```{r load data for QA}
+# Read in water chemistry dataset
+rawData <- readRDS(paste0(params$outDir, "/NLA22_WaterChem_", pubdate_chem, ".rds"))
+
+# Read in sample grid
+sampgrid <- readRDS(paste0(params$outDir, "/NLA22_Sample_Grid_", pubdate_samp, ".rds"))
+
+# Read in profile data means
+prof_means <- readRDS(paste0(params$outDir, "/NLA22_profile_meanCond_pH_", pubdate_prof, '.rds'))
+
+```
+
+Data sources for this script and the date they were last updated in the
+NARS database are listed below:
+
+-   Water quality data: Date `r unique(rawData$PUBLICATION_DATE)`
+
+-   Sample grid: Date `r unique(sampgrid$PUBLICATION_DATE)`
+
+-   Profile data: Date `r unique(prof_means$PUBLICATION_DATE)`
+
+Each time this script is run, the data are read in from a shared ORD
+storage drive (O drive). The data are copied to the report folder and
+appended with the publication date of the data. Note that the date
+appended to the folder (YYYY-MM-DD) is the date the report is run.
+
+## Unit Consistency Check
+
+This section verifies that all units are consistent with the NLA
+Laboratory Operations Manual (LOM); however, some units differ slightly
+from the LOM. For example, for ammonia, nitrite, and nitrate, the units
+used in the NLA database are mg N/L instead of mg/L. For color, the NLA
+uses APHA Pt-Co instead of PCU, though both versions represent the same
+value. For chlorophyll a, the LOM specifies mg/L as the reporting units,
+but in the NLA database ug/L is the standard.
+
+Table 1 contains the frequency of occurrence of mismatches in units
+between those expected in the database and the standardized LOM-based
+list of units. Some units may be mismatched due to capitalization or
+format errors while others may require unit conversion. It is important
+for all units in the data to exactly match those used in the NARS
+database.
+
+```{r units-check}
+# Read in standard units from LOM
+unitsLOM <- read.csv(paste0(here::here(), '/data/LOMunits.csv')) |>
+  mutate(LOM_UNITS = str_trim(LOM_UNITS))
+
+unitsRaw <- rawData |>
+  merge(unitsLOM, by = 'ANALYTE') 
+
+# Identify observations that do not match the LOM (or standardized NLA) units
+nmUnits <- filter(unitsRaw, RESULT_UNITS!=LOM_UNITS) |>
+  group_by(ANALYTE, RESULT_UNITS, LOM_UNITS) |> 
+  summarise(NUMBER_OBSERVATIONS = length(ANALYTE)) |> 
+  ungroup()
+  # ddply(c('ANALYTE', 'RESULT_UNITS', 'LOM_UNITS'), summarise, NUMBER_OBSERVATIONS = length(ANALYTE))
+
+row.names(nmUnits) <- NULL
+# This first table displays all of the combinations observed of mismatched units This table does not distinguish between substantive differences and those only due to differences in capitalization only.
+datatable(nmUnits,
+          caption = htmltools::tags$caption("Table 1: Mismatched analyte units in current data", style='color:black; font-size: 20px; text-align:left')) |>
+  DT::formatStyle(columns = names(nmUnits), fontSize = "75%")
+
+```
+
+## Data Completeness
+
+Two checks are performed to assess the water chemistry data completeness
+with respect to (1) the sample grid for bulk water samples and (2)
+individual analytes within a sample.
+
+#### Sample Grid
+
+The sample grid keeps a record of the status of each sample type for
+each site. When a bulk sample type (e.g., water chemistry \[CHEM\] or
+chlorophyll \[CHLA\]) is not run or lost for some reason (i.e., sample
+could not be collected, lost shipment), this is noted in the sample
+grid. A check is run for consistency between the sample grid and the raw
+data. This can identify two possible issues:
+
+1.  Samples that should appear in the raw data based on the sample grid,
+    but are not present in the raw data
+
+2.  Samples that appear in the raw data, but do not appear in the sample
+    grid (i.e., samples we expect to be missing based on the sample grid
+    are included in the raw data).
+
+Use Table 2 to confirm which bulk samples were not collected and
+identify mismatches between the sample grid and the raw data.
+
+```{r check-sample-grid}
+
+# Find UIDs with missing SAMPLE_TYPES - for each sample type, should either have
+# a SAMPLE_ID or Not Collected or SAMPLE LOST or similar message
+msgSamp <- select(sampgrid, UID, SITE_ID, VISIT_NO, CHEM, CHLX) |>
+  # dplyr::rename(CHLA = CHLX) |>
+  mutate(across(CHEM:CHLX, as.character)) |> 
+  pivot_longer(cols = CHEM:CHLX, values_to = 'QA_MSG', names_to='SAMPLE_TYPE') |>
+  filter(str_detect(QA_MSG, "[A-Z]"))
+
+# Need to check against data to make sure all expected are in the dataset
+curSamp <- select(rawData, UID, SITE_ID, VISIT_NO, SAMPLE_TYPE) |>
+  unique()
+
+sampgrid_long <- select(sampgrid, UID, SITE_ID, VISIT_NO, CHEM, CHLX) |>
+  mutate(across(CHEM:CHLX, as.character)) |> 
+  pivot_longer(cols = CHEM:CHLX, values_to='VALUE', names_to='SAMPLE_TYPE') |>
+  filter(str_detect(VALUE, "[1-9]"))
+
+# First match up those that are in the raw dataset
+matchGrid <- merge(curSamp, sampgrid_long, by = c('UID', 'SITE_ID', 'VISIT_NO', 'SAMPLE_TYPE'))
+
+# Look for those in the raw data that do not have a match in the sample grid
+msgGrid <- anti_join(curSamp, sampgrid_long, by = c('UID', 'SITE_ID', 'VISIT_NO','SAMPLE_TYPE')) |>
+  mutate(QA_MSG = "Individual analytes from this bulk sample appear in raw data, but are not included in sample grid")
+
+# Look for those in the sample grid that do not have a match in the raw data
+msgData <- anti_join(sampgrid_long, curSamp, by = c('UID', 'SITE_ID', 'VISIT_NO','SAMPLE_TYPE')) |>
+  select(-VALUE) |>
+  mutate(QA_MSG = "Sample grid indicates no issues, but individual analytes from this bulk sample are not found in raw data")
+
+# Bind together
+msgComb <- bind_rows(msgSamp, msgGrid, msgData) |>
+  mutate(SAMPLE_TYPE = case_when(SAMPLE_TYPE == "CHLX" ~ "CHLA", 
+                                 TRUE ~ SAMPLE_TYPE))
+
+grid_checks <- datatable(msgComb, caption = htmltools::tags$caption("Table 2: Bulk samples not collected or lost and checking sample grid against raw data to identify mismatches", style='color:black; font-size: 20px; text-align:left')) |>
+  DT::formatStyle(columns = names(msgData), fontSize = "75%")
+
+# Consolidate chunk into one table for QA review
+grid_check_fin <- msgComb |>
+  dplyr::mutate(QA_TYPE = "Sample grid check", .after = SAMPLE_TYPE)
+
+```
+
+`r grid_checks`
+
+#### Water Chemistry Analytes
+
+Table 3 shows instances where an analyte result was not reported at all
+in the water quality data (i.e., no row included for the specific UID
+and analyte in the raw data). This identifies instances where certain
+analytes are reported for a given sample and others are missing. This
+check is differs from Table 2 in that Table 3 checks for within bulk
+sample completeness for reported analytes. As a result, this check does
+not include samples that are expected to be missing based on the sample
+grid (see Table 2).
+
+**Note**: While the PESD Analytical Lab reports nitrate (NITRATE_N) and
+nitrite (NITRITE_N) separately, some labs report a combined value of
+nitrate + nitrite (NITRATE_NITRITE_N) and a nitrate (NITRATE_N) value
+separately. Generally, labs will report one or the other but not all
+three values. Instances where only one of these values (NITRATE_N,
+NITRITE_N, NITRATE_NITRITE_N) are reported will be flagged as missing
+data.
+
+```{r completeness}
+# Select variables needed for this check
+res_flag <- select(rawData, UID, SITE_ID, VISIT_NO, ANALYTE, RESULT, NARS_FLAG)
+
+# Occasionally, data are missing entirely (there is no row for the missing data). This only becomes apparent when the data are converted to wide format by sample UID. Transform the data from long to wide and back to long in order to identify these circumstances.
+
+# This is a fill value to identify missing rows
+no_row   <- -999
+
+# First identify missing result due to having no row in the data. Note that nitrate and nitrite are a special case and are delt with separately below.
+miss_row <- res_flag |>
+  select(-NARS_FLAG) |>
+  pivot_wider(id_cols = c("UID", "SITE_ID", "VISIT_NO"), names_from = ANALYTE, values_from = RESULT, values_fill = no_row) |>
+  pivot_longer(cols = -c(UID, SITE_ID, VISIT_NO), names_to = "ANALYTE", values_to = "RESULT") |>
+  filter(RESULT == no_row) |>
+  filter(!ANALYTE %in% c("NITRATE_NITRITE_N", "NITRATE_N", "NITRITE_N"))
+
+# Nitrate and nitrite data are a special circumstance for missing data
+# Conditions to identify problematically missing nitrate or nitrite data
+# If NITRATE_N and NITRITE_N are present, good
+# If NITRATE_N and NITRATE_NITRITE_N are present, good
+# If NITRATE_NITRITE_N and NITRITE_N are present, good
+# In short, if two of the three are present, good. If one or zero of the three are present, not good and data are incomplete.
+na_code  <- -333
+msg_one  <- "Missing One NOx Result"
+msg_all  <- "All NOx Results Missing"
+NOx_CHECK <- rawData |>
+  select(UID, SITE_ID, VISIT_NO, ANALYTE, RESULT) |>
+  mutate(RESULT = ifelse(is.na(RESULT), na_code, RESULT)) |>
+  pivot_wider(id_cols = c(UID, SITE_ID, VISIT_NO), names_from = ANALYTE, values_from = RESULT, values_fill = no_row) |>
+  mutate(NOx_CHECK = ifelse(
+    (NITRATE_N == no_row & NITRITE_N == no_row & NITRATE_NITRITE_N != no_row), msg_one, ifelse(
+    (NITRATE_N == no_row & NITRITE_N != no_row & NITRATE_NITRITE_N == no_row), msg_one, ifelse(
+    (NITRATE_N != no_row & NITRITE_N == no_row & NITRATE_NITRITE_N == no_row), msg_one, ifelse(
+    (NITRATE_N == no_row & NITRITE_N == no_row & NITRATE_NITRITE_N == no_row), msg_all, "GOOD"))))) |>
+  select(UID, SITE_ID, VISIT_NO, NITRATE_N, NITRITE_N, NITRATE_NITRITE_N, NOx_CHECK) |>
+  filter(NOx_CHECK == msg_one | NOx_CHECK == msg_all)
+
+# Combine nitrate/nitrite checks with all other analytes. Add additional check to remove any flagged rows we expect to be missing based on the sample grid (lost or unanalyzed samples for whatever reason).
+missing_check <- NOx_CHECK |>
+  select(-NOx_CHECK) |>
+  pivot_longer(-c(UID, SITE_ID, VISIT_NO), names_to = "ANALYTE", values_to = "RESULT") |>
+  filter(RESULT == no_row) |>
+  bind_rows(miss_row) |>
+  filter(!UID %in% msgSamp$UID) |>
+  mutate(QA_MSG = "Analyte missing") |>
+  select(-RESULT)
+
+# For purposes of final output, reformat table slightly
+missing_check_fin <- missing_check |>
+  dplyr::rename(SAMPLE_TYPE = ANALYTE) |>
+  dplyr::mutate(QA_TYPE = "Missing analyte check", .after = SAMPLE_TYPE)
+
+# Create display table
+datatable(missing_check, caption = htmltools::tags$caption("Table 3: Individual analytes missing from raw data", style='color:black; font-size: 20px; text-align:left')) %>%
+  DT::formatStyle(columns = names(missing_check), fontSize = "75%")
+
+```
+
+## Flag Consistency Check
+
+This section checks that flags are applied consistently based on the
+water chemistry RESULT, method detection limit (MDL), and reporting
+limit (RL). The checks completed in Table 4 include:
+
+1.  RESULT value is less than the MDL but RESULT is not missing.
+
+2.  RESULT is less than MDL but NARS_FLAG is either missing or does not
+    contain 'ND'.
+
+3.  RESULT is NA but there is no 'ND' or 'NR' flag in NARS_FLAG.
+
+4.  RESULT is greater than or equal to MDL but less than RL and
+    NARS_FLAG is either missing or does not contain 'L'.
+
+5.  RESULT is greater than or equal to MDL but FLAG contains ND
+
+6.  RESULT is greater than or equal to RL but FLAG contains L
+
+```{r flag-consistency}
+# Need to create and add MDL and RL data to the above data
+res_limits <- select(rawData, UID, SITE_ID, VISIT_NO, ANALYTE, RESULT, NARS_FLAG, MDL, RL)
+
+# Look for missing RESULT that lacks a ND or NR flag
+ck_na_res <- res_limits |>
+  filter(is.na(RESULT) & !grepl("ND|NR", NARS_FLAG)) |>
+  mutate(QA_MSG = "NA result without ND or NR flag")
+
+# Look for non-missing RESULT values that are less than the MDL
+ck_mdl <- filter(res_limits, RESULT<MDL & !is.na(RESULT)) |>
+  mutate(ND_RESULT = 'Result present and below MDL')
+
+ck_mdl.1 <- filter(res_limits, RESULT<MDL & (is.na(NARS_FLAG)|str_detect(NARS_FLAG, 'ND')==FALSE)) |>
+  mutate(QA_MSG='ND flag missing')
+
+# Look for non-missing values between the MDL and the RL without an L flag
+ck_rl <- filter(res_limits, RESULT>=MDL & RESULT<RL & !is.na(RESULT) & str_detect(NARS_FLAG, 'L')==FALSE) |>
+  mutate(QA_MSG = 'L flag missing')
+
+# Check for RESULT value below MDL but no NARS_FLAG or NARS_FLAG that does not include ND
+wrong_nd <- filter(res_limits, !is.na(MDL)) |>
+  filter(RESULT>MDL & str_detect(NARS_FLAG, 'ND')) |>
+  mutate(QA_MSG = 'Incorrect ND flag RESULT >= MDL')
+
+# Check for RESULT value above RL but NARS_FLAG='L'
+l_flag <- filter(res_limits, str_detect(NARS_FLAG, 'L') & RESULT>=RL) |>
+  mutate(QA_MSG = 'Incorrect L flag RESULT >= RL')
+
+# Combine all checks. Consolidate to one message
+comb_cks <- full_join(ck_mdl, ck_mdl.1) |>
+  full_join(ck_na_res) |>
+  full_join(ck_rl) |>
+  full_join(wrong_nd) |>
+  full_join(l_flag) |>
+  unique() |>
+  mutate(QA_MSG = ifelse(is.na(ND_RESULT), QA_MSG, ifelse(is.na(QA_MSG), ND_RESULT, paste0(ND_RESULT, "; ", QA_MSG)))) |>
+  select(-ND_RESULT)
+
+# Create final table for QA export
+flag_checks_fin <- comb_cks |>
+  select(UID, SITE_ID, VISIT_NO, ANALYTE, QA_MSG) |>
+  dplyr::mutate(QA_TYPE = "Flag consistency check", .after = ANALYTE) |>
+  dplyr::rename(SAMPLE_TYPE = ANALYTE)
+  
+# Table for report
+datatable(comb_cks, caption = htmltools::tags$caption("Table 4: NARS_FLAG consistency issues", style='color:black; font-size: 20px; text-align:left')) |>
+  DT::formatStyle(columns = names(comb_cks), fontSize = "75%")
+
+```
+
+## Internal Chemical Validity Checks
+
+For this set of checks, ions are converted to units of microequivalents
+(µeq/L) to account for charge. In addition, where conductivity or pH
+data is missing from laboratory measurements, the mean of the upper two
+meters of profile data is substituted.
+
+*Code for Chemical Validity Data Prep*
+
+```{r qa-data-prep}
+# Create QA Data
+qa_data <- rawData |>
+  mutate(RESULT = ifelse(str_detect(NARS_FLAG, 'ND') & !is.na(NARS_FLAG), 0.5*MDL, RESULT)) |>
+  merge(prof_means, by = c('UID', 'SITE_ID', 'VISIT_NO', 'ANALYTE'), all=TRUE) |>
+  mutate(RESULT = ifelse(is.na(RESULT.x) & !is.na(RESULT.y), RESULT.y, RESULT.x)) |>
+  select(-RESULT.x, -RESULT.y) |>
+  filter(UID %in% rawData$UID)
+
+qa_res <- qa_data |>
+  pivot_wider(id_cols = c('UID', 'SITE_ID', 'VISIT_NO'), names_from = 'ANALYTE', values_from='RESULT')
+
+qa_units <- qa_data |>
+  mutate(variable = paste(ANALYTE, 'UNITS', sep = '_')) |>
+  pivot_wider(id_cols = c('UID'), names_from = 'variable', values_from='RESULT_UNITS')
+
+qa_data_1 <- full_join(qa_res, qa_units, by = 'UID')
+
+# We need to convert some analytes to ueq/L
+qa_mod <- mutate(qa_data_1, 
+                 SO4 = SULFATE*20.82,
+                 NO3 = NITRATE_N*71.39,
+                 NO2 = NITRITE_N*71.39,
+                 NO2NO3 = ifelse(!is.na(NITRATE_NITRITE_N), 
+                                 NITRATE_NITRITE_N*71.39, NO3+NO2),
+                 NH4 = AMMONIA_N*71.39,
+                 Ca = CALCIUM*49.90,
+                 Cl = CHLORIDE*28.21,
+                 Mg = MAGNESIUM*82.26,
+                 Na = SODIUM*43.50,
+                 K = POTASSIUM*25.57,
+                 NTL = NTL*1000,
+                 NTL_DISS = NTL_DISS*1000) |>
+  select(-SULFATE, -NITRATE_N, -NITRITE_N, -AMMONIA_N, -CALCIUM, -CHLORIDE,
+         -MAGNESIUM, -SODIUM, -POTASSIUM)
+
+# Now Calculate H, OH, HCO3, CO3, as well as constants for organic anion concentration
+qa_mod_1 <- mutate(qa_mod, 
+              H = (10^(-PH))*(10^6),
+              OH = (10^(PH-14))*(10^6),
+              HCO3 = ANC + H,
+              CO3 = 0,
+              HMOL = 10^(-PH),
+              ALKCALC = ANC,
+              KNH4 = 5.012E-10,
+              NH4ION = NH4 * (10^(-PH))/(KNH4 + (10^(-PH))),
+              PKo = 0.96 + 0.9*PH - 0.039*(PH^2),
+              Ko = 10^PKo,
+              CT = DOC*10,
+              ORGION = CT*Ko/(Ko + (10^(-PH)))
+          ) |>
+  mutate(HCO3 = ifelse(!is.na(HCO3) & HCO3<0, 0, HCO3)) |>
+  mutate(NTL_UNITS = 'ug/L', NTL_DISS_UNITS='ug/L')
+
+qa_mod_2 <- group_by(qa_mod_1, UID) |> 
+  mutate(DIN = sum(NO2NO3, NH4, na.rm = T)*14.0007,
+                 CAMG = sum(Ca, Mg),
+# CALCULATE ION BALANCES BASED ON DIFFERENT ORGANIC ACID CONTRIBUTIONS
+##DOES THIS ASSUME THAT MISSING VALUES WILL JUST BE ADDED INTO THE EQUATION?
+# Use Alan's substitutions as more accurate for anions (ANC + H) = HCO3 + CO3 + OH
+# Calculate balance as a percent of the sum of anion and cation charge. Calculating as a percent of the average of the two results in flagging many more observations than necessary for the QA process.
+                 CATSUM = sum(Ca, Mg, K, Na, NH4ION, H),
+                 ANSUM = sum(Cl, NO3, SO4, ANC, H),
+                 ANDEF = CATSUM-ANSUM,
+                 BALANCE = (ANDEF/(ANSUM+CATSUM))*100) |>
+  ungroup() |> 
+  ## ROUND CALCULATED VARIABLES
+  mutate(CO3 = round(CO3,3),
+         HCO3 = round(HCO3,3),
+         H = round(H,3),
+         OH = round(OH,3),
+         ALKCALC = round(ALKCALC,2),
+         CATSUM = round(CATSUM,2),
+         ANSUM = round(ANSUM,2),
+         ANDEF = round(ANDEF,2),
+         BALANCE = round(BALANCE,2),
+         ORGION = round(ORGION,2)) |>
+  mutate(CONCAL = ifelse(COND<100, ((Ca*59.47) + (Mg*53.0) + (K*73.48) + (Na*50.08) + (NH4ION*73.5) + (H*349.65) + (SO4*80.0) + ((ANC+H-OH)*44.5) + # substitute (ANC+H-OH) in place of HCO3+CO3
+           (Cl*76.31) + (NO3*71.42) + 
+           (OH*198))/1000, 
+           ifelse(COND>=100 & ANC>0 & !is.na(ANC),
+                  (Ca/2000*(119-((60.2+0.229*119)*sqrt(Ca/2000000))))+
+                 (Mg/2000*(106-((60.2+0.229*106)*sqrt(Mg/2000000))))+
+                 (K/1000*(73.5-((60.2+0.229*73.5)*sqrt(K/1000000))))+
+                 (Na/1000*(50.1-((60.2+0.229*50.1)*sqrt(Na/1000000))))+
+                 (NH4ION/1000*(73.5-((60.2+0.229*73.5)*sqrt(NH4ION/1000000))))+
+                 (H/1000*(350-((60.2+0.229*350)*sqrt(H/1000000))))+
+                 (SO4/2000*(80-((60.2+0.229*80)*sqrt(SO4/2000000))))+
+                 ((ANC+H-OH)/1000*(44.5-((60.2+0.229*44.5)*sqrt((ANC+H-OH)/1000000))))+
+                 (Cl/1000*(76.3-((60.2+0.229*76.3)*sqrt(Cl/1000000))))+
+                 (NO3/1000*(71.4-((60.2+0.229*71.4)*sqrt(NO3/1000000))))+
+                 (OH/1000*(198-((60.2+0.229*198)*sqrt(OH/1000000)))), 
+              ifelse(COND>=100 & (ANC<=0|is.na(ANC)),
+                     (Ca/2000*(119-((60.2+0.229*119)*sqrt(Ca/2000000))))+
+                     (Mg/2000*(106-((60.2+0.229*106)*sqrt(Mg/2000000))))+
+                     (K/1000*(73.5-((60.2+0.229*73.5)*sqrt(K/1000000))))+
+                     (Na/1000*(50.1-((60.2+0.229*50.1)*sqrt(Na/1000000))))+
+                     (NH4ION/1000*(73.5-((60.2+0.229*73.5)*sqrt(NH4ION/1000000))))+
+                     (H/1000*(350-((60.2+0.229*350)*sqrt(H/1000000))))+
+                     (SO4/2000*(80-((60.2+0.229*80)*sqrt(SO4/2000000))))+
+                     (Cl/1000*(76.3-((60.2+0.229*76.3)*sqrt(Cl/1000000))))+
+                     (NO3/1000*(71.4-((60.2+0.229*71.4)*sqrt(NO3/1000000))))+
+                     (OH/1000*(198-((60.2+0.229*198)*sqrt(OH/1000000)))), NA)))      
+        ) |>
+# COMPUTE DIFFFERENCE BETWEEN CALCULATED AND MEASURED
+  mutate(CONDIF = CONCAL - COND,
+  	 PCONDIF = (CONDIF/COND)*100) |>
+  # ROUNDING CALCULATED VARIABLES 
+  mutate(CONCAL = round(CONCAL,2),
+     CONDIF = round(CONDIF,2),
+  	 PCONDIF = round(PCONDIF,1)) |>
+  mutate(ORGN = NTL - NTL_DISS,
+         ORGP = PTL - PTL_DISS)
+```
+
+### Ionic Strength Balance
+
+Table 5 identifies observations where there is a large imbalance of
+cations and anions. Potential outliers are flagged when the charge
+balance is greater than +/-20% of the sum of cations plus anions (i.e.
+abs(BALANCE) \> 20%).
+
+-   CATSUM: Sum of cations (Ca, Mg, K, Na, NH4, H)
+-   ANSUM: Sum of anions (Cl, NO3, SO4, ANC, H)
+-   ANDEF: Anion deficit or anions subtracted from cations
+    (CATSUM-ANSUM)
+-   BALANCE: Size of the deficit relative to the total charge
+    (ANDEF/(CATSUM + ANSUM) \* 0.5) \* 100
+
+The table includes several checks that are intended to help identify the
+potential sources of the imbalance.
+
+-   DIRECTION: Indicates whether there are more cations or anions in the
+    sample (i.e., whether the anion deficit is negative or positive).
+
+-   IMBAL_SRC: Source of the imbalance. Compares the measured and
+    calculated conductivity to sign of the anion deficit to identify
+    whether the source of the imbalance is due to too many or too few
+    cations or anions.
+
+-   ORGION_CHK: Organic anion check. In instances where there are too
+    few anions in the sample, unmeasured organic anions may account for
+    the deficit. Can be useful to look that the DOC concentration as
+    well. Generally DOC over 10 mg/L indicates the potential for
+    presence of organic anions, lower concentration for very dilute
+    systems (COND \< 40) This checks the estimated organic anions
+    against the anion deficit (when present).
+
+-   PH_CHK: pH check. Generates a flag when the pH is \< 5. Under highly
+    acidic conditions (pH ≤ 5), there can be many unmeasured cations
+    present in the sample.
+
+-   ANC_CAMG_CHK: Acid neutralizing capacity and calcium plus magnesium
+    check. Generally, ANC and Ca+Mg will be approximately equal.
+    Substantial deviations from this (relative to the overall charge in
+    the sample) may indicate issues with one or more of these
+    measurements.
+
+-   NACL_CHK: Sodium and chloride check. Generally, there is more Na
+    than Cl in water samples. Instances where Na \< Cl are suspect and
+    instances where Na is more than 40x the amount of Cl are suspect.
+
+```{r ion-balance-test}
+ionbal <- mutate(qa_mod_2,
+                 OUTLIERION = 'NO',
+                 TESTION = 'Non-outlier')
+
+# Any observation with >20% balance should be flagged for QA review
+Off_balance <- with(ionbal, which(abs(BALANCE)>20))
+
+ionbal$OUTLIERION[Off_balance] <- "YES"
+ionbal$TESTION[Off_balance] <- "ION BALANCE > 20%"
+
+# Add various ion balance check messages
+iontest <- filter(ionbal, OUTLIERION=='YES') |>
+  select(UID, SITE_ID, VISIT_NO, Ca, Mg, K, Na, NH4ION, H, Cl, NO3, SO4, ANC, H, ORGION, PH, CATSUM, ANSUM, ANDEF, BALANCE, COND, CONCAL) |>
+  arrange(desc(BALANCE)) |>
+  mutate(DIRECTION = ifelse(BALANCE > 0, "More cations than anions", "More anions than cations"),
+         IMBAL_SRC = case_when(BALANCE > 0 & CONCAL > COND ~ "Too many cations",
+                                 BALANCE > 0 & CONCAL < COND ~ "Too few anions",
+                                 BALANCE < 0 & CONCAL > COND ~ "Too many anions",
+                                 BALANCE < 0 & CONCAL < COND ~ "Too few cations",
+                                 TRUE ~ "Undefined"),
+         ORGION_CHK = ifelse(CONCAL < COND & ORGION >= ANDEF, "Organic anions may account for deficit", 
+                             "Organic anions lower than the deficit"),
+         PH_CHK = case_when(PH <= 5 ~ "Highly acidic, likely many unmeasured cations", 
+                            PH > 5 ~ "Not highly acidic",
+                            CONCAL < COND & PH <= 5 ~ "Highly acidic, unmeasured cations may account for deficit"),
+         ANC_CAMG_CHK = ifelse((ANC - Ca - Mg) > 0,  "ANC higher than Ca + Mg", "ANC lower than Ca + Mg"),
+         NACL_CHK = case_when(Na/Cl < 0.8 ~ "More Cl than Na",
+                              Na/Cl > 40 ~ "More than 40x Na as Cl",
+                              TRUE ~ "No NaCl issue detected"))
+
+# Combine all the messages into a single column
+iontest_fin <- iontest |>
+  mutate(SAMPLE_TYPE = "IONS",
+         QA_TYPE = "Ion balance",
+         QA_MSG = paste0("DIRECTION = ", DIRECTION, " due to ", IMBAL_SRC, ". Check flags: ", ORGION_CHK, "; ", PH_CHK, "; ", ANC_CAMG_CHK, "; ", "NACL_CHK")) |>
+  select(UID, SITE_ID, VISIT_NO, SAMPLE_TYPE, QA_TYPE, QA_MSG)
+
+# Table for report
+datatable(iontest, caption = htmltools::tags$caption("Table 5: Observations with ion balance > +/-20%", style='color:black; font-size: 20px; text-align:left')) |>
+  formatRound(columns = c('Ca', 'Mg', "K", "Na", "NH4ION", "H", "Cl", "NO3", "SO4", "ANC", "ORGION", "PH", "CATSUM", "ANSUM", "ANDEF", "BALANCE", "COND", "CONCAL"), digits = 0) |>
+  DT::formatStyle(columns = names(iontest), fontSize = "75%")
+
+```
+
+### Conductivity Checks
+
+Table 6 identifies observations where there is a mismatch between the
+measured and calculated conductivity that are not captured by the above
+ionic strength balance checks.
+
+Definitions
+
+-   COND: Measured conductivity, either from the lab or the mean of the
+    upper two meters of the profile data
+
+-   CONCAL: Calculated conductivity, based on the sum of the cations and
+    anions
+
+-   CONDIF: Difference between the measured and calculated conductivity
+    (CONCAL - COND)
+
+-   PCONDIF: Percent deviation between calculated and measured
+    conductivity (CONDIF / COND \* 100)
+
+-   COND_FLAG: Reason that the observation was flagged. There are two
+    levels to this check:
+
+    -   Cond_Diff_20% - For non-dilute samples (\> 100 uS/cm), instance
+        where measured and calculated conductivity differ by more than
+        20%
+
+    -   Cond_Diff_10uS/cm - For dilute samples (\< 100 uS/cm), instances
+        where the measured and calculated conductivity differ by more
+        than 10 uS/cm
+
+Observations with conductivity over 1000 uS/cm are noted. In these
+instances there are generally many unmeasured ions. Occasionally,
+conductivity is mistakenly reported in mS/cm.
+
+```{r conductivity checks}
+# Create the flag, filter to observations that are flagged, then filter to observations not flagged by the above ionic balance check
+cond_check <- qa_mod_2 |>
+  mutate(COND_FLAG = case_when(COND < 100 & abs(CONDIF) > 10 ~ "Conductivity <100 uS/cm, Discrepency of >10 uS/cm",
+                               COND >= 100 & COND < 1000 & abs(PCONDIF) > 20 ~ "Discrepency >20%",
+                               COND >= 1000 & abs(PCONDIF) > 20 ~ "Discrepency >20%, conductivity >1000 uS/cm",
+                               TRUE ~ "No_Cond_Flag")) |>
+  filter(COND_FLAG != "No_Cond_Flag") |>
+  filter(!UID %in% iontest$UID) |>
+  arrange(desc(PCONDIF)) |>
+  select(UID, SITE_ID, VISIT_NO, COND, CONCAL, CONDIF, PCONDIF, COND_FLAG) |>
+  arrange(COND)
+
+# Table for export
+cond_check_fin <- cond_check |>
+  mutate(SAMPLE_TYPE = "COND",
+         QA_TYPE = "Conductivity balance",
+         QA_MSG = COND_FLAG) |>
+  select(UID, SITE_ID, VISIT_NO, SAMPLE_TYPE, QA_TYPE, QA_MSG)
+
+# Table for report
+datatable(cond_check, caption = htmltools::tags$caption("Table 6: Conductivity check failures not captured by ion balance", style='color:black; font-size: 20px')) |>
+  DT::formatStyle(columns = names(cond_check), fontSize = "75%")
+
+
+```
+
+### Chemical Validity Checks
+
+Total nitrogen (TN) and total phosphorus (TP) should be greater than
+dissolved components. These include nitrate, nitrite, and ammonium for
+nitrogen. The NLA 2022 also included measurements of total dissolved N
+and total dissolved P that include both organic and inorganic forms of N
+or P. Table 7 identifies observations where TN and TP are less than
+dissolved components. Specifically,
+
+-   TN_NO3_NH4_FLAG: Where TN \< (NO3 + NO2 + NH4)
+
+-   TN_TDN_FLAG: Where TN \< Total Dissolved N
+
+-   TP_TDP_FLAG: Where TP \< Total Dissolved P
+
+```{r nutrient check}
+# Note this data replaces values that are below the RL with 0.5 * MDL
+nutr_check <- qa_data_1 |>
+  mutate(TN_NO3_NH4_FLAG = ifelse((NTL < NITRATE_N + NITRITE_N + AMMONIA_N) | 
+                             (NTL < NITRATE_NITRITE_N + AMMONIA_N), "NO3 & NH4 exceed TN", "No NO3 & NH4 flag"),
+         TN_TDN_FLAG = ifelse(NTL < NTL_DISS, "DISS_N exceeds TN", "No DISS_N flag"),
+         TP_TDP_FLAG = ifelse(PTL < PTL_DISS, "DISS_P exceeds TP", "No DISS_P flag")) |>
+  drop_na(TN_NO3_NH4_FLAG:TP_TDP_FLAG) |>
+  filter(!(TN_NO3_NH4_FLAG == "No NO3 & NH4 flag" &
+         TN_TDN_FLAG == "No DISS_N flag" &
+         TP_TDP_FLAG == "No DISS_P flag")) |>
+  select(UID, SITE_ID, VISIT_NO, NTL, NITRATE_N, NITRITE_N, NITRATE_NITRITE_N, AMMONIA_N, NTL_DISS, PTL, PTL_DISS, TN_NO3_NH4_FLAG:TP_TDP_FLAG)
+
+# Table for export
+nutr_check_fin <- nutr_check |>
+  mutate(SAMPLE_TYPE = "Nutrients",
+         QA_TYPE = "Total & Dissolved Nutrients",
+         QA_MSG = paste0(TN_NO3_NH4_FLAG, "; ", TN_TDN_FLAG, "; ", TP_TDP_FLAG)) |>
+  select(UID, SITE_ID, VISIT_NO, SAMPLE_TYPE, QA_TYPE, QA_MSG)
+
+# Table for report
+datatable(nutr_check, caption = htmltools::tags$caption("Table 7: Observations where constituents exceed totals", style='color:black; font-size: 20px; text-align:left')) |>
+  DT::formatStyle(columns = names(nutr_check), fontSize = "75%")
+```
+
+## Export Data for QA Review
+
+```{r output QA data}
+# Combine all the QA checks
+# Add columns to the data for QA reviewer to enter info
+qa_flagged <- grid_check_fin |>
+  bind_rows(missing_check_fin,
+            flag_checks_fin,
+            iontest_fin,
+            cond_check_fin, 
+            nutr_check_fin) |>
+  mutate(QA_NOTES = " ", QA_ACTION = " ", QA_REVISIONS = " ")
+
+file_name <- paste0(params$outDir, "/NLA22_WaterChem_ObservationsForReview_", Sys.Date(), ".csv")
+
+# Write out the data
+readr::write_csv(qa_flagged, file_name)
+
+# Report the location of the exported data
+loc <- sub(paste0(".*(", "/NARS_WaterChem_QA", ")"), "\\1", file_name)
+```
+
+A complete list of data flagged for QA review is exported to: `r loc`
+
+Edit this tabular file to add QA notes, required actions, and necessary
+revisions to the data.
+
+## Initial QA Plots
+
+### Cross Variable Validity Checks
+
+Review the plots below to examine for gross outliers. Gross outliers in
+such plots are indicative of potential database errors (e.g., typos,
+mislabeled units, dilution errors) that should be examined. The
+bivariate plots are pairs of variables that generally have some
+relationship. Outliers that need to be investigated should be obvious.
+
+Note that values for most analytes have been converted to µeq/L from
+mg/L. Values below the method detection limit (MDL) were set to have a
+value of 0.5 \* MDL for the purposes making all data visible on the
+plots. Note that for plotting purposes, all analytes except pH are
+log~10~-transformed.
+
+```{r prep-chem-plot-data}
+paramLabels <- tibble(labs = c("Ammonia (ueq/L),NH4", 
+                         "Ammonium ion (ueq/L),NH4ION",
+                         "ANC (ueq/L),ANC", 
+                         "Anion deficit (cations - anions),ANDEF", 
+                         "Anion sum (HCO3+Cl+SO4+NO3+OH),ANSUM", 
+                         "Calcium (ueq/L),Ca", 
+                         "Calcium + Magnesium (ueq/L),CAMG", 
+                         "Calculated conductivity,CONCAL",
+                         "Calculated-Measured Cond.,CONDIF", 
+                         "% Difference from calc. conductivity,PCONDIF", 
+                         "Cation sum (Ca+K+Mg+Na+NH4ion+H),CATSUM", 
+                         "Chlorophyll a (ug/L),CHLA",
+                         "Chloride (ueq/L),Cl",
+                         "Color (APHA PT-CO),COLOR",
+                         "Conductivity (uS/cm),COND", 
+                         "DOC (mg/L),DOC",  
+                         "Ion Balance,BALANCE", 
+                         "Magnesium (ueq/L),Mg", 
+                         "NH4 + NO3 (ueq/L),DIN", 
+                         "Nitrate (ueq/L),NO3", 
+                         "Nitrite (ueq/L),NO2", 
+                         "Nitrate-Nitrite (ueq/L),NO2NO3", 
+                         "Organic Ions (mg/L),ORGION",
+                         "pH,PH", 
+                         "Turbidity (NTU),TURB", 
+                         "Potassium (ueq/L),K", 
+                         "Sodium (ueq/L),Na", 
+                         "Sulfate (ueq/L),SO4", 
+                         "Total Nitrogen (ug/L),NTL", 
+                         "Total Dissolved Nitrogen (ug/L),NTL_DISS",
+                         "Total Phosphorus (ug/L),PTL",
+                         "Total Dissolved Phosphorus (ug/L),PTL_DISS",
+                         "Organic Phosphorus (ug/L),ORGP",
+                         "Organic Nitrogen (ug/L),ORGN")) |>
+ separate_wider_delim(cols = labs,
+                      delim = ',',
+                      names = c('LABEL', 'PARAMETER')) 
+
+paramPairs <- data.frame(x = c('Cl', 'Cl', 'Cl', 'SO4', 'DOC', 'PTL', 'PTL',
+                               'NTL', 'NTL', 'NO3', 'PH', 'PH', 'ANC', 'ANC',
+                               'CHLA'), 
+                         y = c('SO4', 'COND', 'Na', 'COND', 'COLOR', 'NTL',
+                               'TURB', 'TURB', 'NO3', 'NH4', 'DOC', 'COND',
+                               'PH', 'CAMG', 'PTL')) |>
+  inner_join(paramLabels, by = c('x'='PARAMETER')) |>
+  dplyr::rename(label.x = 'LABEL') |>
+  inner_join(paramLabels, by=c('y'='PARAMETER')) |>
+  dplyr::rename(label.y = 'LABEL')
+
+convLog <- function(x){
+  minx <- min(x, na.rm=T)
+                
+  x <- ifelse(minx<=0, log10(x - minx + 1), 
+              log10(x))
+}
+
+chemPlotIn <- qa_mod_2 |>
+  pivot_longer(cols = c(ANC:NTL_DISS, PTL:TURB, SO4:K, DIN:CONCAL, ORGN:ORGP)) |>
+  group_by(name) |> 
+  mutate(minx = min(value, na.rm=T)) |> 
+  ungroup() |> 
+  mutate(value.1 = ifelse(minx<=0, log10(value - minx + 1), 
+              log10(value))) |>
+  select(-minx) |>
+  pivot_wider(id_cols=c('UID', 'SITE_ID', 'VISIT_NO', 'PH'), values_from='value.1')
+
+```
+
+```{r chem-plots}
+for(i in 1:4){
+  j <- (i-1)*4+1
+  if(i!=4){
+   p1 <- ggplot(data = chemPlotIn,
+                aes(x = eval(as.name(paramPairs$x[j])), 
+                y = eval(as.name(paramPairs$y[j])))) + 
+     geom_point() +
+     theme(axis.text = element_text(size=12),
+                  axis.title = element_text(size=14)) +
+     ylab(paramPairs$label.y[j]) +
+     xlab(paramPairs$label.x[j])
+    
+   p2 <- ggplot(data = chemPlotIn,
+                aes(x = eval(as.name(paramPairs$x[j+1])), 
+                y = eval(as.name(paramPairs$y[j+1])))) + 
+     geom_point() +
+     theme(axis.text = element_text(size=12),
+                  axis.title = element_text(size=14)) +
+     ylab(paramPairs$label.y[j+1]) +
+     xlab(paramPairs$label.x[j+1])
+   
+   p3 <- ggplot(data = chemPlotIn,
+                aes(x = eval(as.name(paramPairs$x[j+2])), 
+                y = eval(as.name(paramPairs$y[j+2])))) + 
+     geom_point() +
+     theme(axis.text = element_text(size=12),
+                  axis.title = element_text(size=14)) +
+     ylab(paramPairs$label.y[j+2]) +
+     xlab(paramPairs$label.x[j+2])
+   
+   p4 <- ggplot(data = chemPlotIn,
+                aes(x = eval(as.name(paramPairs$x[j+3])), 
+                y = eval(as.name(paramPairs$y[j+3])))) + 
+     geom_point() +
+     theme(axis.text = element_text(size=12),
+                  axis.title = element_text(size=14)) +
+     ylab(paramPairs$label.y[j+3]) +
+     xlab(paramPairs$label.x[j+3])
+   
+   print(plot_grid(p1, p2, p3, p4, ncol=2, label_size=10))
+  }else{
+      p1 <- ggplot(data = chemPlotIn,
+                aes(x = eval(as.name(paramPairs$x[j])), 
+                y = eval(as.name(paramPairs$y[j])))) + 
+     geom_point() +
+     theme(axis.text = element_text(size=12),
+                  axis.title = element_text(size=14)) +
+     ylab(paramPairs$label.y[j]) +
+     xlab(paramPairs$label.x[j])
+    
+   p2 <- ggplot(data = chemPlotIn,
+                aes(x = eval(as.name(paramPairs$x[j+1])), 
+                y = eval(as.name(paramPairs$y[j+1])))) + 
+     geom_point() +
+     theme(axis.text = element_text(size=12),
+                  axis.title = element_text(size=14)) +
+     ylab(paramPairs$label.y[j+1]) +
+     xlab(paramPairs$label.x[j+1])
+   
+   p3 <- ggplot(data = chemPlotIn,
+                aes(x = eval(as.name(paramPairs$x[j+2])), 
+                y = eval(as.name(paramPairs$y[j+2])))) + 
+     geom_point() +
+     theme(axis.text = element_text(size=12),
+                  axis.title = element_text(size=14)) +
+     ylab(paramPairs$label.y[j+2]) +
+     xlab(paramPairs$label.x[j+2]) 
+   
+   print(plot_grid(p1, p2, p3, ncol=2, label_size=10))
+  }
+}
+```
+
+### Repeat Visit Validity Checks
+
+Examining measured water quality variables by plotting values from visit
+1 against those from visit 2 can identify anomalous values in the data.
+The 1:1 line represents equal values for both visits. Note that
+dissolved forms of nutrients and chlorophyll a can change between
+visits. In these cases, it can be useful to evaluate whether other
+analytes changes between visits as an additional check.
+
+```{r prep-revisit-data}
+
+analytes <- names(qa_data_1)[!(names(qa_data_1) %in% c('UID', 'VISIT_NO', 'SITE_ID', names(qa_data_1)[str_detect(names(qa_data_1), 'UNITS')]))] 
+
+vis2 <- filter(qa_data_1, VISIT_NO=='2') |>
+  select(-UID, -VISIT_NO) |>
+  pivot_longer(cols = all_of(analytes), names_to='ANALYTE', 
+               values_to='VISIT_2') |>
+  select(SITE_ID, ANALYTE, VISIT_2)
+
+vis1 <- filter(qa_data_1, VISIT_NO=='1') |>
+  select(-UID, -VISIT_NO) |>
+  filter(SITE_ID %in% vis2$SITE_ID) |>
+  pivot_longer(cols = all_of(analytes), names_to = 'ANALYTE', 
+               values_to = 'VISIT_1') |>
+  select(SITE_ID, ANALYTE, VISIT_1)
+
+vis12 <- merge(vis1, vis2, by = c('SITE_ID', 'ANALYTE')) |>
+  filter(!is.na(VISIT_1) & !is.na(VISIT_2))
+
+paramLabels.1 <- tibble(labs = c("Ammonia (mg N/L),AMMONIA_N", 
+                         "ANC (ueq/L),ANC", 
+                         "Calcium (mg/L),CALCIUM", 
+                         "Chlorophyll a (ug/L),CHLA",
+                         "Chloride (mg/L),CHLORIDE",
+                         "Color (APHA PT-CO),COLOR",
+                         "Conductivity (uS/cm),COND", 
+                         "DOC (mg/L),DOC",  
+                         "Magnesium (mg/L),MAGNESIUM", 
+                         "Nitrate (mg N/L),NITRATE_N", 
+                         "Nitrite (mg N/L),NITRITE_N", 
+                         "Nitrate-Nitrite (mg/L),NITRATE_NITRITE_N", 
+                         "pH,PH", 
+                         "Turbidity (NTU),TURB", 
+                         "Potassium (mg/L),POTASSIUM", 
+                         "Sodium (mg/L),SODIUM", 
+                         "Sulfate (mg/L),SULFATE", 
+                         "Total Nitrogen (mg/L),NTL", 
+                         "Total Dissolved Nitrogen (mg/L),NTL_DISS",
+                         "Total Phosphorus (ug/L),PTL",
+                         "Total Dissolved Phosphorus (ug/L),PTL_DISS",
+                         "Silica (mg/L),SILICA")) |>
+ separate_wider_delim(cols = labs,
+                      delim = ',',
+                      names = c('LABEL', 'ANALYTE')) 
+
+
+```
+
+```{r repeat-visits-plots}
+for(i in 1:6){
+  j <- (i-1)*4+1
+  if(i!=6){  
+    
+    p1 <- ggplot(filter(vis12, ANALYTE == paramLabels.1$ANALYTE[j]), 
+                 aes(x=VISIT_1, y = VISIT_2)) + 
+            geom_point() +
+            geom_abline(intercept=0, slope=1) + 
+            xlab("Visit 1") +
+            ylab("Visit 2") +
+            ggtitle(paramLabels.1$LABEL[j])
+    
+    p2 <- ggplot(filter(vis12, ANALYTE == paramLabels.1$ANALYTE[j+1]), 
+                 aes(x=VISIT_1, y = VISIT_2)) + 
+            geom_point() +
+            geom_abline(intercept=0, slope=1) + 
+            xlab("Visit 1") +
+            ylab("Visit 2") +
+            ggtitle(paramLabels.1$LABEL[j+1])
+      
+    p3 <- ggplot(filter(vis12, ANALYTE == paramLabels.1$ANALYTE[j+2]), 
+                 aes(x=VISIT_1, y = VISIT_2)) + 
+            geom_point() +
+            geom_abline(intercept=0, slope=1) + 
+            xlab("Visit 1") +
+            ylab("Visit 2") +
+            ggtitle(paramLabels.1$LABEL[j+2])
+        
+    p4 <- ggplot(filter(vis12, ANALYTE == paramLabels.1$ANALYTE[j+3]), 
+                 aes(x=VISIT_1, y = VISIT_2)) + 
+            geom_point() +
+            geom_abline(intercept=0, slope=1) + 
+            xlab("Visit 1") +
+            ylab("Visit 2") +
+            ggtitle(paramLabels.1$LABEL[j+3])
+    
+    print(plot_grid(p1, p2, p3, p4, ncol=2, label_size=10))
+  
+  }else{
+    p1 <- ggplot(filter(vis12, ANALYTE == paramLabels.1$ANALYTE[j]), 
+               aes(x=VISIT_1, y = VISIT_2)) + 
+          geom_point() +
+          geom_abline(intercept=0, slope=1) + 
+          xlab("Visit 1") +
+          ylab("Visit 2") +
+          ggtitle(paramLabels.1$LABEL[j])
+  
+    p2 <- ggplot(filter(vis12, ANALYTE == paramLabels.1$ANALYTE[j+1]), 
+                 aes(x=VISIT_1, y = VISIT_2)) + 
+            geom_point() +
+            geom_abline(intercept=0, slope=1) + 
+            xlab("Visit 1") +
+            ylab("Visit 2") +
+            ggtitle(paramLabels.1$LABEL[j+1])
+      
+    print(plot_grid(p1, p2, ncol=2, nrow=2, label_size=10))
+  } 
+}
+```
+
+## Appendix
+
+### Background
+
+The water validation process is process by which raw data is **entered**
+(i.e. check that all analytes expected are present) and then
+**validated** (i.e., checked that it was entered correctly) and then
+**quality assured (QAed)** (i.e., checked against other parameters,
+field notes, repeat visits) to address values that are not feasible or
+incorrect. In some cases, values that fail QA can be reanalyzed in the
+lab or fixed by going back to field crews or other data; in other cases,
+values that fail QA should be set to 'missing' or another value. The
+result of this process is a final data set that is ready for scientific
+analysis.
+
+### Prequels
+
+#### Lab Duplicates
+
+PESD-AL (Pacific Ecological Systems Division Analytical Laboratories,
+formerly known as "WRS") does lab duplicates (coded as "LAB_SPLIT") on a
+random subset of samples, usually duplicated within analyte/aliquot
+rather than whole sample duplicates. The duplicate values are often
+included the raw lab data. Rarely, if ever, do these get reported in a
+state lab dataset. Duplicated values should be deleted before proceeding
+with validation.
+
+#### Sample Flow
+
+The water chemistry sample workflow is a follows in the figure below. If
+a sample passes through a 0.4 micron filter, the analyte is considered
+to be "dissolved".
+
+[![Diagram of water chemistry sample workflow for the National Lakes
+Assessment. Source: Figure 10.1 in the 2022 NLA Laboratory Operations
+Manual.](images/NLA%202022%20LOM%20Water%20Chem%20Sample%20Workflow%20Diagram.png)](https://www.epa.gov/system/files/documents/2022-07/LOM%20NLA%202022%20Version1.1_220519_0.pdf)
+
+#### Flags
+
+Data flags have always been used and associated with the EMAP or NARS
+lab water chemistry data:
+
+-   For EMAP only: Each measured variable has a flag indicated with an
+    "F" suffix. So that sulfate in a sample (variable SO4) has a flag
+    SO4F.
+
+-   For NARS only: Each measured variable has a flag indicated with an
+    "\_NARSFLAG" suffix. So the parameter name associated with sulfate
+    flags is SULFATE_NARSFLAG and the variables under that parameter
+    specify what the flag actually is.
+
+The flag can indicate a number of things like holding time violations,
+detection limit issues, or a variety of validation flags. The current
+(as of 2023) flag coding list is:
+
+-   ND -- below the MDL, RESULT should be missing and minimum method
+    detection limit (MDL) should be listed.
+
+-   NR -- no result/record. Data or sample were not collected, not
+    delivered to the lab, or the lab was unable to process the sample.
+
+-   L -- value estimated, typically because value is above MDL but below
+    the reporting limit (RL). RESULT should be provided.
+
+-   S -- shipping flag -- typically means there was a delay in shipping
+    (i.e., sample was received at the lab more than 2 days after it was
+    collected).
+
+-   H -- holding time flag -- indicates sample was analyzed past the
+    target holding time for analyte (number indicates days from
+    collection)
+
+-   Q -- indicates some sort of quality issue with the sample and may
+    require a comment to interpret. If there is a QC_FLAG variable, it
+    may explain the issue.
+
+Other flags that have been used in the past that may be encountered but
+should no longer be used going forward:
+
+-   U -- flag for data that was unusual but further investigation didn't
+    discover any reason to delete it as a validation outlier
+
+-   Vn -- special validation flags, like replacing a missing value with
+    a calculated value. This is no longer used and is now in the "Q"
+    flag universe with a comment
+
+### Missing Value Checks
+
+Check that all samples and all analytes have a value and/or a flag
+(e.g., if below detection). Any missing data should be checked to see if
+it is truly missing. When possible, ask for analyses to be repeated if
+data are missing.
+
+The essential analytes are ANC, DOC, COND, TP, TN since these are part
+of the NLA indicators. If missing, this will result in a not assessed
+population for chemistry.
+
+When missing values are present, sometimes other data can be substituted
+for validation purposes.
+
+-   TN = TKN + NO~3~^-^ (some states only measure TKN)
+
+-   ANC = -H^+^ (10^~pH~^) if acidic and there is no alkalinity reported
+
+-   COND or PH from top 2 meters of field profile measurements
+
+-   COND from calculated conductivity if charge balance complete
+
+### Internal Chemical Validity Checks
+
+Two good ways to validate chemical data for internal consistency are
+charge balance checks and measured vs. calculated conductivity checks. 
+Both require measurements of all the major cations and anions in the
+water sample.
+
+IONS = atoms/molecules that carry a positive or negative electric charge
+as a result of having lost or gained one or more electrons. CATIONS =
+positive charge, ANIONS = negative charge
+
+Salt Dissolution
+
+-   NaCl ⟷  Na^+^  +  Cl^-^  (halite/table salt)
+
+-   CaSO~4~ ⟷ Ca^2+^ + SO~4~^2-^  (gypsum)
+
+TOTAL vs DISSOLVED
+
+Total = run on whole water sample. Non-Ionic (TN, TP, COND, pH, ANC,
+TURB, COLOR)
+
+Dissolved = ions that pass through a 0.45 µm filter (all other chemical
+analytes)
+
+USE MOLAR UNITS
+
+Charge balance is assessed with an atomic basis NOT weight (i.e., One
+atom of Na reacts with Cl; NOT one mg of Na with one mg of Cl)
+
+Convert mg/L to molar units (uM) by molecular weight and to equivalence
+units by multiplying µM by ionic charge (ueq/L). Most are +/- 1, except
+Ca, Mg, SO~4~, CO~3~ (+/- 2).
+
+Charge balance and conductivity checks are done on ions in µeq/L.
+Evaluating charge balances in µeq/L allows for 1:1 comparisons without
+having to convert units.
+
+When evaluating charge imbalance, looking at ion concentrations in molar
+units is helpful because you can compare one molar unit of one ion
+(e.g., calcium) to another (e.g., sodium).
+
+NON-IONIC ANALYTES
+
+TP, TN, DOC, Color, Turbidity don't have an internal consistency check
+due to lack of charge and are therefore harder to validate.
+
+#### Charge Balance
+
+Sum of cations must equal sum of anions (in units of µeq/L).
+
+Measured Freshwater Anions
+
+-   Sulfate (SO~4~^2-^)\*
+
+-   Nitrate (NO~3~^-^)
+
+-   Chloride (Cl^-^)\*
+
+-   Bicarbonate (HCO~3~^-^)\*
+
+-   Carbonate (CO~3~^2-^)
+
+-   Hydroxyl (OH^-^)
+
+Measured Freshwater Cations
+
+-   Calcium (Ca^2+^)\*
+
+-   Magnesium (Mg^2+^)\*
+
+-   Sodium (Na^+^)\*
+
+-   Potassium (K^+^)\*
+
+-   Hydrogen (H^+^)
+
+-   Ammonium (NH~4~^+^)
+
+\* Typically major contributor to ionic strength of freshwaters
+
+#### pH
+
+pH is the direct measure of H^+^.
+
+H~2~O  ⟷  H^+^ + OH ^-^
+
+H^+^ and OH^-^ concentrations calculated from pH and K~w~ for water (\~1
+x 10^-14^)
+
+pH = -log10\[H^+^\], where \[H^+^\] is in M/L
+
+The 'p' in geochemical notation means -log10 so water pK~w~ = 14.
+
+pH + pOH = 14
+
+The balance of H and OH for each pH
+
+| pH  | H^+^ (µeq/L) | OH^--^ (µeq/L) |
+|-----|--------------|----------------|
+| 3   | 1000         | 0.00001        |
+| 4   | 100          | 0.0001         |
+| 5   | 10           | 0.001          |
+| 6   | 1            | 0.01           |
+| 7   | 0.1          | 0.1            |
+| 8   | 0.01         | 1              |
+| 9   | 0.001        | 10             |
+| 10  | 0.0001       | 100            |
+| 11  | 0.00001      | 1000           |
+| 12  | 0.000001     | 10000          |
+
+Concentrations of H and OH calculated from following formula
+
+\[H^+^\] = 10^-pH^
+
+\[OH^--^\] = 10^(pH-14)^
+
+#### Carbonate and Acid Neutralizing Capacity
+
+Pure water in vacuum or inert gas has a pH of 7.
+
+CO~2~ dissolves in water (as does oxygen).
+
+CO~2~ + H~2~O  ⟷  H~2~CO~3~^\*^  ⟷  HCO~3~^-^ + H^+^  ⟷  CO~3~^2-^ +
+H^+^ + H^+^
+
+At atmospheric pCO~2~, equilibrium pH of water is 5.6.
+
+Carbonate species can be estimated by assuming all the ANC is carbonate
+alkalinity, which is not always true but it's a very good estimate for
+QA validation estimates.
+
+ANC = HCO~3~^-^ + CO~3~^2-^ + OH^-^ - H^+^
+
+Use ANC + OH^-^ - H^+^ as a surrogate for HCO~3~^-^ + CO~3~^2-^
+(bicarbonate + carbonate) in internal consistency calculations.
+
+#### Other Ions
+
+Nitrogen Species
+
+Nitrate/Nitrite: If NO~2~^-^ + NO~3~^-^ (combined) is the reported
+analyte; assume it's all nitrate (NO~3~^-^), a pretty robust assumption.
+
+Ammonia/Ammonium: The analytical lab measures ammonia + ammonium, but we
+need to estimate ammonium (NH~4~^+^). Use pKa, pH, and total ammonia to
+calculate NH~4~^+^:
+
+NH~4~^+^  =  NH~3~ + H^+^
+
+KNH~4~= 5.012^-10^
+
+NH4ION = NH~4~^-^ \* (10^-pH^) / (KNH~4~ + 10^-pH^)
+
+Use NH4ION for charge balance/conductivity checks
+
+Silica
+
+The dominant ionic form of silica is H~4~SiO~4~ which is neutral so
+doesn't figure into charge balance or calculated conductivity making
+this analyte difficult to validate.
+
+#### Master Charge Balance Equations
+
+-   CATSUM = CA + MG + K + NA + NH4ION + H;
+
+-   ANSUM = ANC + H + CL + NO3 + SO4 (Note ANC + H = HCO3 + CO3 + OH)
+
+-   ANDEF = CATSUM - ANSUM;
+
+-   BALANCE = ANDEF / (ANSUM + CATSUM) \* 100;
+
+ANDEF is the Anion Deficit. Most charge balances are somewhat negative
+meaning a shortage of anions. ANDEF should be 0 if in balance. ANDEF is
+the amount out of balance.
+
+BALANCE is the important variable, expressed as the charge imbalance
+(ANDEF) as a percent of total ionic concentration. If negative, there
+are more anions than cations. If positive, there are more cations that
+anions.
+
+Additional variables useful for investigating potential outliers:
+
+-   ORGION = Estimated Organic Anion Contribution
+
+-   CONCAL = Calculated Conductivity
+
+-   COND = Observed Conductivity
+
+##### Estimated Organic Ions
+
+Estimate organic anions (ORGION) using an empirical formula (see [Oliver
+et al. 1983](https://doi.org/10.1016/0016-7037(83)90218-1)):
+
+PKo = 0.96 + 0.9 \* pH - 0.039 \* pH \*\* 2;
+
+Ko = 10^-PKo^
+
+CT = DOC \* 10 (\*\* DOC in mg/L \*\*)
+
+ORGION = CT \* Ko / (Ko + 10^-pH^)
+
+##### Calculated Conductivity
+
+Use the molar conductivities of each ion and their µeq/L concentration
+to calculate the calculated conductivity for the sample using these
+equations.
+
+Systems that are lower in conductivity (generally \< 100 µS/cm) can be
+calculated using the infinite dilution method. For systems that are
+higher in conductivity (generally \> 100-200 µS/cm), the electron clouds
+of ions begin to overlap and this makes electrical charge travel more
+slowly through water. In these instances, the Debye-Huckel-Onsager
+correction can be used. This requires that ANC \> 0 (See [Kaufmann et
+al.
+1988](https://nepis.epa.gov/Exe/ZyNET.exe/30000L9D.txt?ZyActionD=ZyDocument&Client=EPA&Index=1986%20Thru%201990&Docs=&Query=Chemical%20Characteristics%20Streams%20Mid%20Atlantic%20Southeastern%20United%20States%20&Time=&EndTime=&SearchMethod=2&TocRestrict=n&Toc=&TocEntry=&QField=&QFieldYear=&QFieldMonth=&QFieldDay=&UseQField=&IntQFieldOp=0&ExtQFieldOp=0&XmlQuery=&File=D%3A%5CZYFILES%5CINDEX%20DATA%5C86THRU90%5CTXT%5C00000002%5C30000L9D.txt&User=ANONYMOUS&Password=anonymous&SortMethod=-%7Ch&MaximumDocuments=15&FuzzyDegree=0&ImageQuality=r85g16/r85g16/x150y150g16/i500&Display=hpfr&DefSeekPage=x&SearchBack=ZyActionL&Back=ZyActionS&BackDesc=Results%20page&MaximumPages=1&ZyEntry=1&SeekPage=x)
+for details).
+
+At infinite dilution:
+
+CONCAL = ((CA\*59.47) + (MG\*53.0) + (K\*73.48) + (NA\*50.08) +
+(NH4ION\*73.5) + (H\*349.65) + (SO4\*80.0) + ((ANC+H-OH)\*44.5) +
+(CL\*76.31) + (NO3\*71.42) + (OH\*198))/1000;
+
+Debye-Huckle-Onsager Correlation if ANC ≥ 0:
+
+CONDHO = ((CA/2000\*(119-((60.2+0.229\*119)\*SQRT(CA/2000000)))) +
+
+(MG/2000\*(106-((60.2+0.229\*106)\*SQRT(MG/2000000)))) +
+
+(K/1000\*(73.5-((60.2+0.229\*73.5)\*SQRT(K/1000000)))) +
+
+(NA/1000\*(50.1-((60.2+0.229\*50.1)\*SQRT(NA/1000000)))) +
+
+(NH4ION/1000\*(73.5-((60.2+0.229\*73.5)\*SQRT(NH4ION/1000000)))) +
+
+(H/1000\*(350-((60.2+0.229\*350)\*SQRT(H/1000000)))) +
+
+(SO4/2000\*(80-((60.2+0.229\*80)\*SQRT(SO4/2000000)))) +
+
+((ANC+H-OH)/1000\*(44.5-((60.2+0.229\*44.5)\*SQRT((ANC+H-OH)/1000000))))
++
+
+(CL/1000\*(76.3-((60.2+0.229\*76.3)\*SQRT(CL/1000000)))) +
+
+(NO3/1000\*(71.4-((60.2+0.229\*71.4)\*SQRT(NO3/1000000)))) +
+
+(OH/1000\*(198-((60.2+0.229\*198)\*SQRT(OH/1000000)))) );
+
+Note: At typical freshwater pHs, most of the carbonate species are
+HCO~3~^-^ so the molar conductivity for HCO~3~^-^ (44.5) instead of
+CO~3~^2-^ (69.3) substituting (ANC + H - OH)) for (HCO3 + CO3) is used
+in the calculation.
+
+##### Process
+
+General thresholds to keep in mind
+
+-   Precision of individual analytes is \~5%
+
+-   BALANCE within +/- 10% are fine for internal consistency
+
+-   BALANCE \> +/-20% are problematic
+
+Common sources of charge imbalance
+
+-   Error in units, recording the data value, or other mistake.
+
+-   Unmeasured cations and or anions. Potential sources include:
+
+    -   Organic anions. Organic anions are not measured and can
+        contribute to charge imbalance in samples. Some weak organic
+        acids will titrate with ANC, but strong organic acids will not.
+        An indicator of high organic anions is high DOC.
+
+    -   Unmeasured cations in acidic systems from metals in ionic form.
+
+    -   Saline systems have a number of unmeasured ions and everything
+        is in very high concentration
+
+-   High turbidity or total suspended solid samples can interfere with
+    analytical chemistry, giving questionable ion concentrations.
+
+![Diagram of diagnostic process for charge imbalances in
+samples.](images/NLA%20Charge%20Balance%20Diagram.png)
+
+Additional Notes:
+
+When there is an excess of ions, focus of ions that have large values.
+Ions values near zero aren't going to contribute much to charge balance.
+When there is a deficit of ions, look for suspiciously low ion values.
+
+In both cases, look at the magnitude of Ca + Mg vs. ANC and Na vs. Cl
+relationships. Typically both relationships are each near 1:1 and
+outliers point to potential problem. It's not uncommon to see more Na
+than Cl in a sample since there are many additional geologic sources of
+Na, but suspect instances where Na \< Cl.
+
+In general, trust the COND measurement. This is done in the lab and is a
+reliable analysis that's typically difficult to get faulty numbers. The
+most common issue with COND is that the wrong units are input (mS/cm
+rather than µS/cm).
+
+BALANCE and COND checks will often identify the same problematic
+analytes. High ORGION and low pH can account for conductivity check
+differences using same criteria used in BALANCE section**.**
+
+For conductivity, if the calculated conductivity is \>10-20% off from
+measured conductivity, investigate sample. If ion balance is \<10%,
+suspect lab conductivity by checking against the field COND measure.
+
+### Cross Variable Validity Checks
+
+A very useful validation exercise is to do bivariate scatterplots among
+the various measured chemical analytes that typically show some kind of
+relationship. Gross outliers in such plots are indicative of potential
+database errors (e.g., typos, mislabeled units, dilution errors) that
+should be examined. These are relationships that *should* be related,
+that outliers from the cloud plots should be obvious. This can also be
+an opportunity to check very high and very low values. Consider whether
+these values make sense in the context of the other analytes in the
+sample (e.g., are other analytes high or is the system dilute in
+general?). Suggested bivariate relationships to examine:
+
+-   Cl -- SO4
+
+-   CL -- COND
+
+-   NA - CL
+
+-   SO4 -- COND
+
+-   DOC -- COLOR
+
+-   PTL -- NTL
+
+-   PTL -- TURB
+
+-   NTL -- TURB
+
+-   Org N - DOC
+
+-   Org P -- DOC
+
+-   NTL - NO3
+
+-   NO3 - NH4
+
+-   pH - DOC
+
+-   pH - COND
+
+-   ANC -- PH
+
+-   ANC -- CA+MG
+
+-   CHLA -- TP
+
+### Repeat Visit Validity Checks
+
+There is generally a strong relationship between water chemistry
+measured in the first sample visit and the second sample visit. It is
+worth plotting visit 1 vs visit 2 plots with a 1:1 line for all
+analytes. Looking for gross outliers, chemistry can change between
+visits although it is typically not a large change. In cases where there
+is a change, it can be useful to examine other analytes from the same
+sample to see if changes consistent in terms of direction across
+analytes.
+
+### Calculated Variable Validity Checks
+
+Simple checks to make sure that the Total N and Total P are greater than
+species/dissolved analytes; the sum has to be greater than the parts for
+analytes that are related.  Specifically,
+
+-   Total N \> NO~3~^-^ + NH~4~^+^
+
+-   Total N \> Total Dissolved N
+
+-   Total P \> Total Dissolved P
+
+### Extreme Value Checks
+
+Examine the range of all the lab chemistry variables looking for
+impossibly high or low values.
+
+### Final Data Preparation
+
+Generate a list of values for lab reanalysis if that is still possible.
+
+Generate a list of validation outliers and their fixes (and flags).
+
+There is also usually some database clean up/flag generation that needs
+to take place before the lab water chem data is finalized and validated.
+Make sure the data is standardized so that all values below either the
+detection or reporting limit are treated the same way.
+
+### References
+
+Kaufmann, P., A. Herlihy, J. Elwood, M. Mitch, S. Overton, M. Sale, J.
+Messer, K. Reckhow, K. Cougan, D. Peck, J. Coe, A. Kinney, S. Christie,
+D. Brown, C. Hagley, and Y. Jager. 1988. Chemical Characteristics of
+Streams in the Mid-Atlantic and Southeastern United States (Results of
+the National Stream Survey-Phase I), Volume I: Population Descriptions
+and Physico-Chemical Relationships. EPA/600/3-88/021a, U.S.
+Environmental Protection Agency, Washington D.C.
+[Link](https://nepis.epa.gov/Exe/ZyNET.exe/30000L9D.txt?ZyActionD=ZyDocument&Client=EPA&Index=1986%20Thru%201990&Docs=&Query=Chemical%20Characteristics%20Streams%20Mid%20Atlantic%20Southeastern%20United%20States%20&Time=&EndTime=&SearchMethod=2&TocRestrict=n&Toc=&TocEntry=&QField=&QFieldYear=&QFieldMonth=&QFieldDay=&UseQField=&IntQFieldOp=0&ExtQFieldOp=0&XmlQuery=&File=D%3A%5CZYFILES%5CINDEX%20DATA%5C86THRU90%5CTXT%5C00000002%5C30000L9D.txt&User=ANONYMOUS&Password=anonymous&SortMethod=-%7Ch&MaximumDocuments=15&FuzzyDegree=0&ImageQuality=r85g16/r85g16/x150y150g16/i500&Display=hpfr&DefSeekPage=x&SearchBack=ZyActionL&Back=ZyActionS&BackDesc=Results%20page&MaximumPages=1&ZyEntry=1&SeekPage=x).
+
+Oliver, B.G., E.M. Thurman, and R.K. Malcolm. 1983. The contribution of
+humic substances to the acidity of colored natural waters. Geochimica et
+Cosmochimica Acta. 47:2031-2035.
+[Link](https://www.sciencedirect.com/science/article/pii/0016703783902181).
