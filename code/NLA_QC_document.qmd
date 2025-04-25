@@ -42,7 +42,7 @@ implemented.
 In the sections below, the code identifies observations that are shown
 in the table that are flagged for potential completeness, consistency,
 or quality issues. In addition, the script generates a data table in
-`r paste0("NARS_WaterChem_QC/reports/NLA_Water_Chem_QC_Output_", Sys.Date())`
+`r paste0("NARS_WaterChem_QC/outputs/NLA_Water_Chem_QC_Output_", Sys.Date())`
 called
 `r paste0("NLA22_WaterChem_ObservationsForReview_", Sys.Date(), ".csv")`
 that contains all flagged observations with additional columns for the
@@ -61,7 +61,7 @@ library(DT)
 library(cowplot)
 library(gridExtra)
 
-# outDir <- paste0(here::here(), "/reports/NLA_Water_Chem_QC_Output_", Sys.Date())
+# outDir <- paste0(here::here(), "/outputs/NLA_Water_Chem_QC_Output_", Sys.Date())
 
 ```
 

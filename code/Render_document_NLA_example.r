@@ -1,6 +1,6 @@
 library(quarto)
 
-outDir <- paste0(here::here(), "/output/Example_NLA_Water_Chem_QC_Output_", Sys.Date())
+outDir <- paste0(here::here(), "/outputs/Example_NLA_Water_Chem_QC_Output_", Sys.Date())
 dir.create(path = outDir, showWarnings = FALSE, recursive = TRUE)
 
 inDir_raw <- paste0(here::here(), "/data") 
