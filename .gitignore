@@ -1,7 +1,7 @@
 # The output report
 code/*.html
-report/*.html
-reports/
+outputs/*.html
+outputs/
 reports/*.html
 
 # History files
