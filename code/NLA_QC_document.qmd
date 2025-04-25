@@ -42,7 +42,7 @@ implemented.
 In the sections below, the code identifies observations that are shown
 in the table that are flagged for potential completeness, consistency,
 or quality issues. In addition, the script generates a data table in
-`r paste0("NARS_WaterChem_QA/reports/NLA_Water_Chem_QA_Report_", Sys.Date())`
+`r paste0("NARS_WaterChem_QC/reports/NLA_Water_Chem_QC_Output_", Sys.Date())`
 called
 `r paste0("NLA22_WaterChem_ObservationsForReview_", Sys.Date(), ".csv")`
 that contains all flagged observations with additional columns for the
@@ -50,7 +50,7 @@ reviewer to provide notes, list any actions required, and finally record
 any revisions to the observation.
 
 All code used to generate this report appear in the code chunks. These
-are included for transparency in the quality assurance process.
+are included for transparency in the quality control process.
 
 ```{r load packages}
 options(scipen=999)
@@ -61,7 +61,7 @@ library(DT)
 library(cowplot)
 library(gridExtra)
 
-# outDir <- paste0(here::here(), "/reports/NLA_Water_Chem_QA_Report_", Sys.Date())
+# outDir <- paste0(here::here(), "/reports/NLA_Water_Chem_QC_Output_", Sys.Date())
 
 ```
 
@@ -109,7 +109,7 @@ pubdate_chem <- unique(rawData$PUBLICATION_DATE)
 pubdate_prof <- unique(profile_data$PUBLICATION_DATE)
 pubdate_samp <- unique(sampgrid$PUBLICATION_DATE)
 
-# Create a date-stamped copy for use in QA process
+# Create a date-stamped copy for use in QC process
 saveRDS(rawData, paste0(params$outDir, "/NLA22_WaterChem_", pubdate_chem, ".rds"))
 
 saveRDS(prof_means, paste0(params$outDir, "/NLA22_profile_meanCond_pH_", pubdate_prof, '.rds'))
@@ -118,7 +118,7 @@ saveRDS(sampgrid, paste0(params$outDir, "/NLA22_Sample_Grid_", pubdate_samp, ".r
 
 ```
 
-```{r load data for QA}
+```{r load data for QC}
 # Read in water chemistry dataset
 rawData <- readRDS(paste0(params$outDir, "/NLA22_WaterChem_", pubdate_chem, ".rds"))
 
@@ -216,8 +216,8 @@ identify mismatches between the sample grid and the raw data.
 msgSamp <- select(sampgrid, UID, SITE_ID, VISIT_NO, CHEM, CHLX) |>
   # dplyr::rename(CHLA = CHLX) |>
   mutate(across(CHEM:CHLX, as.character)) |> 
-  pivot_longer(cols = CHEM:CHLX, values_to = 'QA_MSG', names_to='SAMPLE_TYPE') |>
-  filter(str_detect(QA_MSG, "[A-Z]"))
+  pivot_longer(cols = CHEM:CHLX, values_to = 'QC_MSG', names_to='SAMPLE_TYPE') |>
+  filter(str_detect(QC_MSG, "[A-Z]"))
 
 # Need to check against data to make sure all expected are in the dataset
 curSamp <- select(rawData, UID, SITE_ID, VISIT_NO, SAMPLE_TYPE) |>
@@ -233,12 +233,12 @@ matchGrid <- merge(curSamp, sampgrid_long, by = c('UID', 'SITE_ID', 'VISIT_NO', 
 
 # Look for those in the raw data that do not have a match in the sample grid
 msgGrid <- anti_join(curSamp, sampgrid_long, by = c('UID', 'SITE_ID', 'VISIT_NO','SAMPLE_TYPE')) |>
-  mutate(QA_MSG = "Individual analytes from this bulk sample appear in raw data, but are not included in sample grid")
+  mutate(QC_MSG = "Individual analytes from this bulk sample appear in raw data, but are not included in sample grid")
 
 # Look for those in the sample grid that do not have a match in the raw data
 msgData <- anti_join(sampgrid_long, curSamp, by = c('UID', 'SITE_ID', 'VISIT_NO','SAMPLE_TYPE')) |>
   select(-VALUE) |>
-  mutate(QA_MSG = "Sample grid indicates no issues, but individual analytes from this bulk sample are not found in raw data")
+  mutate(QC_MSG = "Sample grid indicates no issues, but individual analytes from this bulk sample are not found in raw data")
 
 # Bind together
 msgComb <- bind_rows(msgSamp, msgGrid, msgData) |>
@@ -248,9 +248,9 @@ msgComb <- bind_rows(msgSamp, msgGrid, msgData) |>
 grid_checks <- datatable(msgComb, caption = htmltools::tags$caption("Table 2: Bulk samples not collected or lost and checking sample grid against raw data to identify mismatches", style='color:black; font-size: 20px; text-align:left')) |>
   DT::formatStyle(columns = names(msgData), fontSize = "75%")
 
-# Consolidate chunk into one table for QA review
+# Consolidate chunk into one table for QC review
 grid_check_fin <- msgComb |>
-  dplyr::mutate(QA_TYPE = "Sample grid check", .after = SAMPLE_TYPE)
+  dplyr::mutate(QC_TYPE = "Sample grid check", .after = SAMPLE_TYPE)
 
 ```
 
@@ -320,13 +320,13 @@ missing_check <- NOx_CHECK |>
   filter(RESULT == no_row) |>
   bind_rows(miss_row) |>
   filter(!UID %in% msgSamp$UID) |>
-  mutate(QA_MSG = "Analyte missing") |>
+  mutate(QC_MSG = "Analyte missing") |>
   select(-RESULT)
 
 # For purposes of final output, reformat table slightly
 missing_check_fin <- missing_check |>
   dplyr::rename(SAMPLE_TYPE = ANALYTE) |>
-  dplyr::mutate(QA_TYPE = "Missing analyte check", .after = SAMPLE_TYPE)
+  dplyr::mutate(QC_TYPE = "Missing analyte check", .after = SAMPLE_TYPE)
 
 # Create display table
 datatable(missing_check, caption = htmltools::tags$caption("Table 3: Individual analytes missing from raw data", style='color:black; font-size: 20px; text-align:left')) %>%
@@ -361,27 +361,27 @@ res_limits <- select(rawData, UID, SITE_ID, VISIT_NO, ANALYTE, RESULT, NARS_FLAG
 # Look for missing RESULT that lacks a ND or NR flag
 ck_na_res <- res_limits |>
   filter(is.na(RESULT) & !grepl("ND|NR", NARS_FLAG)) |>
-  mutate(QA_MSG = "NA result without ND or NR flag")
+  mutate(QC_MSG = "NA result without ND or NR flag")
 
 # Look for non-missing RESULT values that are less than the MDL
 ck_mdl <- filter(res_limits, RESULT<MDL & !is.na(RESULT)) |>
   mutate(ND_RESULT = 'Result present and below MDL')
 
 ck_mdl.1 <- filter(res_limits, RESULT<MDL & (is.na(NARS_FLAG)|str_detect(NARS_FLAG, 'ND')==FALSE)) |>
-  mutate(QA_MSG='ND flag missing')
+  mutate(QC_MSG='ND flag missing')
 
 # Look for non-missing values between the MDL and the RL without an L flag
 ck_rl <- filter(res_limits, RESULT>=MDL & RESULT<RL & !is.na(RESULT) & str_detect(NARS_FLAG, 'L')==FALSE) |>
-  mutate(QA_MSG = 'L flag missing')
+  mutate(QC_MSG = 'L flag missing')
 
 # Check for RESULT value below MDL but no NARS_FLAG or NARS_FLAG that does not include ND
 wrong_nd <- filter(res_limits, !is.na(MDL)) |>
   filter(RESULT>MDL & str_detect(NARS_FLAG, 'ND')) |>
-  mutate(QA_MSG = 'Incorrect ND flag RESULT >= MDL')
+  mutate(QC_MSG = 'Incorrect ND flag RESULT >= MDL')
 
 # Check for RESULT value above RL but NARS_FLAG='L'
 l_flag <- filter(res_limits, str_detect(NARS_FLAG, 'L') & RESULT>=RL) |>
-  mutate(QA_MSG = 'Incorrect L flag RESULT >= RL')
+  mutate(QC_MSG = 'Incorrect L flag RESULT >= RL')
 
 # Combine all checks. Consolidate to one message
 comb_cks <- full_join(ck_mdl, ck_mdl.1) |>
@@ -390,13 +390,13 @@ comb_cks <- full_join(ck_mdl, ck_mdl.1) |>
   full_join(wrong_nd) |>
   full_join(l_flag) |>
   unique() |>
-  mutate(QA_MSG = ifelse(is.na(ND_RESULT), QA_MSG, ifelse(is.na(QA_MSG), ND_RESULT, paste0(ND_RESULT, "; ", QA_MSG)))) |>
+  mutate(QC_MSG = ifelse(is.na(ND_RESULT), QC_MSG, ifelse(is.na(QC_MSG), ND_RESULT, paste0(ND_RESULT, "; ", QC_MSG)))) |>
   select(-ND_RESULT)
 
-# Create final table for QA export
+# Create final table for QC export
 flag_checks_fin <- comb_cks |>
-  select(UID, SITE_ID, VISIT_NO, ANALYTE, QA_MSG) |>
-  dplyr::mutate(QA_TYPE = "Flag consistency check", .after = ANALYTE) |>
+  select(UID, SITE_ID, VISIT_NO, ANALYTE, QC_MSG) |>
+  dplyr::mutate(QC_TYPE = "Flag consistency check", .after = ANALYTE) |>
   dplyr::rename(SAMPLE_TYPE = ANALYTE)
   
 # Table for report
@@ -414,26 +414,26 @@ meters of profile data is substituted.
 
 *Code for Chemical Validity Data Prep*
 
-```{r qa-data-prep}
-# Create QA Data
-qa_data <- rawData |>
+```{r QC-data-prep}
+# Create QC Data
+qc_data <- rawData |>
   mutate(RESULT = ifelse(str_detect(NARS_FLAG, 'ND') & !is.na(NARS_FLAG), 0.5*MDL, RESULT)) |>
   merge(prof_means, by = c('UID', 'SITE_ID', 'VISIT_NO', 'ANALYTE'), all=TRUE) |>
   mutate(RESULT = ifelse(is.na(RESULT.x) & !is.na(RESULT.y), RESULT.y, RESULT.x)) |>
   select(-RESULT.x, -RESULT.y) |>
   filter(UID %in% rawData$UID)
 
-qa_res <- qa_data |>
+qc_res <- qc_data |>
   pivot_wider(id_cols = c('UID', 'SITE_ID', 'VISIT_NO'), names_from = 'ANALYTE', values_from='RESULT')
 
-qa_units <- qa_data |>
+qc_units <- qc_data |>
   mutate(variable = paste(ANALYTE, 'UNITS', sep = '_')) |>
   pivot_wider(id_cols = c('UID'), names_from = 'variable', values_from='RESULT_UNITS')
 
-qa_data_1 <- full_join(qa_res, qa_units, by = 'UID')
+qc_data_1 <- full_join(qc_res, qc_units, by = 'UID')
 
 # We need to convert some analytes to ueq/L
-qa_mod <- mutate(qa_data_1, 
+qc_mod <- mutate(qc_data_1, 
                  SO4 = SULFATE*20.82,
                  NO3 = NITRATE_N*71.39,
                  NO2 = NITRITE_N*71.39,
@@ -451,7 +451,7 @@ qa_mod <- mutate(qa_data_1,
          -MAGNESIUM, -SODIUM, -POTASSIUM)
 
 # Now Calculate H, OH, HCO3, CO3, as well as constants for organic anion concentration
-qa_mod_1 <- mutate(qa_mod, 
+qc_mod_1 <- mutate(qc_mod, 
               H = (10^(-PH))*(10^6),
               OH = (10^(PH-14))*(10^6),
               HCO3 = ANC + H,
@@ -468,13 +468,13 @@ qa_mod_1 <- mutate(qa_mod,
   mutate(HCO3 = ifelse(!is.na(HCO3) & HCO3<0, 0, HCO3)) |>
   mutate(NTL_UNITS = 'ug/L', NTL_DISS_UNITS='ug/L')
 
-qa_mod_2 <- group_by(qa_mod_1, UID) |> 
+qc_mod_2 <- group_by(qc_mod_1, UID) |> 
   mutate(DIN = sum(NO2NO3, NH4, na.rm = T)*14.0007,
                  CAMG = sum(Ca, Mg),
 # CALCULATE ION BALANCES BASED ON DIFFERENT ORGANIC ACID CONTRIBUTIONS
 ##DOES THIS ASSUME THAT MISSING VALUES WILL JUST BE ADDED INTO THE EQUATION?
 # Use Alan's substitutions as more accurate for anions (ANC + H) = HCO3 + CO3 + OH
-# Calculate balance as a percent of the sum of anion and cation charge. Calculating as a percent of the average of the two results in flagging many more observations than necessary for the QA process.
+# Calculate balance as a percent of the sum of anion and cation charge. Calculating as a percent of the average of the two results in flagging many more observations than necessary for the QC process.
                  CATSUM = sum(Ca, Mg, K, Na, NH4ION, H),
                  ANSUM = sum(Cl, NO3, SO4, ANC, H),
                  ANDEF = CATSUM-ANSUM,
@@ -577,11 +577,11 @@ potential sources of the imbalance.
     instances where Na is more than 40x the amount of Cl are suspect.
 
 ```{r ion-balance-test}
-ionbal <- mutate(qa_mod_2,
+ionbal <- mutate(qc_mod_2,
                  OUTLIERION = 'NO',
                  TESTION = 'Non-outlier')
 
-# Any observation with >20% balance should be flagged for QA review
+# Any observation with >20% balance should be flagged for QC review
 Off_balance <- with(ionbal, which(abs(BALANCE)>20))
 
 ionbal$OUTLIERION[Off_balance] <- "YES"
@@ -610,9 +610,9 @@ iontest <- filter(ionbal, OUTLIERION=='YES') |>
 # Combine all the messages into a single column
 iontest_fin <- iontest |>
   mutate(SAMPLE_TYPE = "IONS",
-         QA_TYPE = "Ion balance",
-         QA_MSG = paste0("DIRECTION = ", DIRECTION, " due to ", IMBAL_SRC, ". Check flags: ", ORGION_CHK, "; ", PH_CHK, "; ", ANC_CAMG_CHK, "; ", "NACL_CHK")) |>
-  select(UID, SITE_ID, VISIT_NO, SAMPLE_TYPE, QA_TYPE, QA_MSG)
+         QC_TYPE = "Ion balance",
+         QC_MSG = paste0("DIRECTION = ", DIRECTION, " due to ", IMBAL_SRC, ". Check flags: ", ORGION_CHK, "; ", PH_CHK, "; ", ANC_CAMG_CHK, "; ", "NACL_CHK")) |>
+  select(UID, SITE_ID, VISIT_NO, SAMPLE_TYPE, QC_TYPE, QC_MSG)
 
 # Table for report
 datatable(iontest, caption = htmltools::tags$caption("Table 5: Observations with ion balance > +/-20%", style='color:black; font-size: 20px; text-align:left')) |>
@@ -658,7 +658,7 @@ conductivity is mistakenly reported in mS/cm.
 
 ```{r conductivity checks}
 # Create the flag, filter to observations that are flagged, then filter to observations not flagged by the above ionic balance check
-cond_check <- qa_mod_2 |>
+cond_check <- qc_mod_2 |>
   mutate(COND_FLAG = case_when(COND < 100 & abs(CONDIF) > 10 ~ "Conductivity <100 uS/cm, Discrepency of >10 uS/cm",
                                COND >= 100 & COND < 1000 & abs(PCONDIF) > 20 ~ "Discrepency >20%",
                                COND >= 1000 & abs(PCONDIF) > 20 ~ "Discrepency >20%, conductivity >1000 uS/cm",
@@ -672,9 +672,9 @@ cond_check <- qa_mod_2 |>
 # Table for export
 cond_check_fin <- cond_check |>
   mutate(SAMPLE_TYPE = "COND",
-         QA_TYPE = "Conductivity balance",
-         QA_MSG = COND_FLAG) |>
-  select(UID, SITE_ID, VISIT_NO, SAMPLE_TYPE, QA_TYPE, QA_MSG)
+         QC_TYPE = "Conductivity balance",
+         QC_MSG = COND_FLAG) |>
+  select(UID, SITE_ID, VISIT_NO, SAMPLE_TYPE, QC_TYPE, QC_MSG)
 
 # Table for report
 datatable(cond_check, caption = htmltools::tags$caption("Table 6: Conductivity check failures not captured by ion balance", style='color:black; font-size: 20px')) |>
@@ -700,7 +700,7 @@ dissolved components. Specifically,
 
 ```{r nutrient check}
 # Note this data replaces values that are below the RL with 0.5 * MDL
-nutr_check <- qa_data_1 |>
+nutr_check <- qc_data_1 |>
   mutate(TN_NO3_NH4_FLAG = ifelse((NTL < NITRATE_N + NITRITE_N + AMMONIA_N) | 
                              (NTL < NITRATE_NITRITE_N + AMMONIA_N), "NO3 & NH4 exceed TN", "No NO3 & NH4 flag"),
          TN_TDN_FLAG = ifelse(NTL < NTL_DISS, "DISS_N exceeds TN", "No DISS_N flag"),
@@ -714,43 +714,43 @@ nutr_check <- qa_data_1 |>
 # Table for export
 nutr_check_fin <- nutr_check |>
   mutate(SAMPLE_TYPE = "Nutrients",
-         QA_TYPE = "Total & Dissolved Nutrients",
-         QA_MSG = paste0(TN_NO3_NH4_FLAG, "; ", TN_TDN_FLAG, "; ", TP_TDP_FLAG)) |>
-  select(UID, SITE_ID, VISIT_NO, SAMPLE_TYPE, QA_TYPE, QA_MSG)
+         QC_TYPE = "Total & Dissolved Nutrients",
+         QC_MSG = paste0(TN_NO3_NH4_FLAG, "; ", TN_TDN_FLAG, "; ", TP_TDP_FLAG)) |>
+  select(UID, SITE_ID, VISIT_NO, SAMPLE_TYPE, QC_TYPE, QC_MSG)
 
 # Table for report
 datatable(nutr_check, caption = htmltools::tags$caption("Table 7: Observations where constituents exceed totals", style='color:black; font-size: 20px; text-align:left')) |>
   DT::formatStyle(columns = names(nutr_check), fontSize = "75%")
 ```
 
-## Export Data for QA Review
+## Export Data for QC Review
 
-```{r output QA data}
-# Combine all the QA checks
-# Add columns to the data for QA reviewer to enter info
-qa_flagged <- grid_check_fin |>
+```{r output QC data}
+# Combine all the QC checks
+# Add columns to the data for QC reviewer to enter info
+qc_flagged <- grid_check_fin |>
   bind_rows(missing_check_fin,
             flag_checks_fin,
             iontest_fin,
             cond_check_fin, 
             nutr_check_fin) |>
-  mutate(QA_NOTES = " ", QA_ACTION = " ", QA_REVISIONS = " ")
+  mutate(QC_NOTES = " ", QC_ACTION = " ", QC_REVISIONS = " ")
 
 file_name <- paste0(params$outDir, "/NLA22_WaterChem_ObservationsForReview_", Sys.Date(), ".csv")
 
 # Write out the data
-readr::write_csv(qa_flagged, file_name)
+readr::write_csv(qc_flagged, file_name)
 
 # Report the location of the exported data
-loc <- sub(paste0(".*(", "/NARS_WaterChem_QA", ")"), "\\1", file_name)
+loc <- sub(paste0(".*(", "/NARS_WaterChem_QC", ")"), "\\1", file_name)
 ```
 
-A complete list of data flagged for QA review is exported to: `r loc`
+A complete list of data flagged for QC review is exported to: `r loc`
 
-Edit this tabular file to add QA notes, required actions, and necessary
+Edit this tabular file to add QC notes, required actions, and necessary
 revisions to the data.
 
-## Initial QA Plots
+## Initial QC Plots
 
 ### Cross Variable Validity Checks
 
@@ -823,7 +823,7 @@ convLog <- function(x){
               log10(x))
 }
 
-chemPlotIn <- qa_mod_2 |>
+chemPlotIn <- qc_mod_2 |>
   pivot_longer(cols = c(ANC:NTL_DISS, PTL:TURB, SO4:K, DIN:CONCAL, ORGN:ORGP)) |>
   group_by(name) |> 
   mutate(minx = min(value, na.rm=T)) |> 
@@ -920,15 +920,15 @@ analytes changes between visits as an additional check.
 
 ```{r prep-revisit-data}
 
-analytes <- names(qa_data_1)[!(names(qa_data_1) %in% c('UID', 'VISIT_NO', 'SITE_ID', names(qa_data_1)[str_detect(names(qa_data_1), 'UNITS')]))] 
+analytes <- names(qc_data_1)[!(names(qc_data_1) %in% c('UID', 'VISIT_NO', 'SITE_ID', names(qc_data_1)[str_detect(names(qc_data_1), 'UNITS')]))] 
 
-vis2 <- filter(qa_data_1, VISIT_NO=='2') |>
+vis2 <- filter(qc_data_1, VISIT_NO=='2') |>
   select(-UID, -VISIT_NO) |>
   pivot_longer(cols = all_of(analytes), names_to='ANALYTE', 
                values_to='VISIT_2') |>
   select(SITE_ID, ANALYTE, VISIT_2)
 
-vis1 <- filter(qa_data_1, VISIT_NO=='1') |>
+vis1 <- filter(qc_data_1, VISIT_NO=='1') |>
   select(-UID, -VISIT_NO) |>
   filter(SITE_ID %in% vis2$SITE_ID) |>
   pivot_longer(cols = all_of(analytes), names_to = 'ANALYTE', 
@@ -1035,11 +1035,11 @@ for(i in 1:6){
 The water validation process is process by which raw data is **entered**
 (i.e. check that all analytes expected are present) and then
 **validated** (i.e., checked that it was entered correctly) and then
-**quality assured (QAed)** (i.e., checked against other parameters,
+**quality controlled (QCed)** (i.e., checked against other parameters,
 field notes, repeat visits) to address values that are not feasible or
-incorrect. In some cases, values that fail QA can be reanalyzed in the
+incorrect. In some cases, values that fail QC can be reanalyzed in the
 lab or fixed by going back to field crews or other data; in other cases,
-values that fail QA should be set to 'missing' or another value. The
+values that fail QC should be set to 'missing' or another value. The
 result of this process is a final data set that is ready for scientific
 analysis.
 
@@ -1266,7 +1266,7 @@ At atmospheric pCO~2~, equilibrium pH of water is 5.6.
 
 Carbonate species can be estimated by assuming all the ANC is carbonate
 alkalinity, which is not always true but it's a very good estimate for
-QA validation estimates.
+QC validation estimates.
 
 ANC = HCO~3~^-^ + CO~3~^2-^ + OH^-^ - H^+^
 
