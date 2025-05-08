@@ -53,7 +53,7 @@ file.edit("code/Render_document_NLA_example.r")
 Running the above rendering script will generate an new date-stamped directory in the outputs folder. This directory will contain copies of the data files used to run the script, the HTML output, and the flagged observations for QC review in a comma separated file. To view a list of the files an example of an output folder, run the following:
 
 ```{r}
-list.files("outputs/Example_NLA_Water_Chem_QC_Output_2025-04-25")
+list.files("outputs/Example_NLA_Water_Chem_QC_Output_2025-05-08")
 ```
 
 ### Access Documents without Code
