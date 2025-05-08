@@ -50,7 +50,7 @@ The QC processes is rendered by running a separate script. Open this script by r
 file.edit("code/Render_document_NLA_example.r")
 ```
 
-Running the above rendering script will generate an new date-stamped directory in outputs folder. This directory will contain copies of the data files used to run the script, the HTML output, and the flagged observations for QC review in a comma separated file. To view a list of the files an example of an output folder, run the following:
+Running the above rendering script will generate an new date-stamped directory in the outputs folder. This directory will contain copies of the data files used to run the script, the HTML output, and the flagged observations for QC review in a comma separated file. To view a list of the files an example of an output folder, run the following:
 
 ```{r}
 list.files("outputs/Example_NLA_Water_Chem_QC_Output_2025-04-25")
@@ -58,7 +58,7 @@ list.files("outputs/Example_NLA_Water_Chem_QC_Output_2025-04-25")
 
 ### Access Documents without Code
 
-To acces the files without using code, download a zip file of the repository using the instructions [here](https://docs.github.com/en/get-started/start-your-journey/downloading-files-from-github). The HTML file can be opened in any web browser.
+To acces the files without using code, download a zip file of the repository using the instructions [here](https://docs.github.com/en/get-started/start-your-journey/downloading-files-from-github). The example HTML output file in can be opened in any web browser.
 
 ### Acknowledgments
 
