@@ -2,7 +2,7 @@
 
 An example of the code-assisted process to quality control the National Aquatic Resource Survey (NARS) surface water data inclusive of physical, chemical, and chlorophyll a parameters. Currently, the process used for the National Lakes Assessment is available.
 
-Please cite this code using the following citation: Handler, A., K. Blocksom,A. Herlihy, A. Nahlik and A. Trebitz (2025). Reproducible workflow for performing quality control on National Aquatic Resource Survey water quality data. GitHub, <https://github.com/USEPA/NARS_WaterChem_QC_Example>.
+Please cite this code using the following citation: Handler, A., K. Blocksom, A. Herlihy, A. Nahlik and A. Trebitz (2025). Reproducible workflow for performing quality control on National Aquatic Resource Survey water quality data. GitHub, <https://github.com/USEPA/NARS_WaterChem_QC_Example>.
 
 #### Contacts
 
@@ -44,26 +44,26 @@ To open the code for the QC process and output generation, run the following:
 file.edit("code/NLA_QC_document.qmd")
 ```
 
-The QC processes is rendered from a second script. Open this script by running the following:
+The QC processes is rendered by running a separate script. Open this script by running the following:
 
 ```{r}
 file.edit("code/Render_document_NLA_example.r")
 ```
 
-Running the above rendering script will generate an new date-stamped directory in the outputs folder. This directory will contain copies of the data files used to run the script, the HTML output, and the flagged observations for QC review in a comma separated file. To view an example of an output folder, run the following:
+Running the above rendering script will generate an new date-stamped directory in outputs folder. This directory will contain copies of the data files used to run the script, the HTML output, and the flagged observations for QC review in a comma separated file. To view a list of the files an example of an output folder, run the following:
 
 ```{r}
 list.files("outputs/Example_NLA_Water_Chem_QC_Output_2025-04-25")
 ```
 
-#### Access Documents without Code
+### Access Documents without Code
 
 To acces the files without using code, download a zip file of the repository using the instructions [here](https://docs.github.com/en/get-started/start-your-journey/downloading-files-from-github). The HTML file can be opened in any web browser.
 
-#### Acknowledgments
+### Acknowledgments
 
 This process was based on the quality control process developed by Alan Herlihy and David Peck. Thanks also to Donald Benkendorf, Lareina Guenzel, Sarah Lehmann, and Richard Mitchell.
 
-#### Disclaimer
+### Disclaimer
 
 The United States Environmental Protection Agency (EPA) GitHub project code is provided on an "as is" basis and the user assumes responsibility for its use. EPA has relinquished control of the information and no longer has responsibility to protect the integrity , confidentiality, or availability of the information. Any reference to specific commercial products, processes, or services by service mark, trademark, manufacturer, or otherwise, does not constitute or imply their endorsement, recommendation or favoring by EPA. The EPA seal and logo shall not be used in any manner to imply endorsement of any commercial product or activity by EPA or the United States Government.
