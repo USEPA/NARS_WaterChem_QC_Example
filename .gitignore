@@ -54,3 +54,6 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Dataset variable descriptions
+data/Dataset_VariableDescriptions.xlsx
