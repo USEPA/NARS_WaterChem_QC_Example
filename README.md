@@ -1,6 +1,8 @@
-# National Aquatic Resource Survey Surface Water Data Quality Assurance
+# National Aquatic Resource Survey Framework for Surface Water Data Quality Control
 
-A code-assisted process for validation and quality assurance of the National Aquatic Resource Survey (NARS) surface water data inclusive of physical, chemical, and chlorophyll a parameters.
+An example of the code-assisted process to quality control the National Aquatic Resource Survey (NARS) surface water data inclusive of physical, chemical, and chlorophyll a parameters. Currently, the process used for the National Lakes Assessment is available.
+
+Please cite this code using the following citation: Handler, A., K. Blocksom,A. Herlihy, A. Nahlik and A. Trebitz (2025). Reproducible workflow for performing quality control on National Aquatic Resource Survey water quality data. GitHub, <https://github.com/USEPA/NARS_WaterChem_QC_Example>.
 
 #### Contacts
 
@@ -10,33 +12,57 @@ A code-assisted process for validation and quality assurance of the National Aqu
 
 #### Project Description
 
-The purpose of this code and resulting report is to provide a code-assisted, reproducible framework for quality assuring the NARS surface water quality data. The data are inclusive of physical and chemical parameters as well as chlorophyll a. Data are evaluated for completeness and consistency while also providing an initial data quality check. The code includes checks for data completeness based on field logs, consistency in reporting units, consistency in data quality flags, checks for internal chemical validity, and provides a comprehensive set of bivariate plots to aid identifying data quality issues. The code produces a report in HTML format for interactive use and a tabular data file with all observations flagged by the process. The tabular file can be used to provide comments on further investigations and follow-up actions, thus providing a record of the QA process. Additional background information on water quality validation is provided in the report appendix.
+The purpose of this code and resulting report is to provide a code-assisted, reproducible framework for quality controlling the NARS surface water quality data. The data are inclusive of physical and chemical parameters as well as chlorophyll a. Data are evaluated for completeness and consistency while also providing an number of data quality checks. The code includes checks for data completeness based on field logs, consistency in reporting units, consistency in data quality flags, checks for internal chemical validity, and provides a comprehensive set of bivariate plots to aid identifying data quality issues. The code produces a document in HTML format for interactive use and a tabular data file with all observations flagged by the process. The tabular file can be used to provide notes on further investigations and follow-up actions, thus providing a record of the quality control process. Additional background information on water quality validation is provided in the document appendix.
 
-#### Directory Structure
+### Clone Repository
 
-The QA process has currently been developed for the National Lakes Assessment (NLA) and the National Rivers and Streams Assessment (NRSA).
+Run the following code in terminal to clone the repository to a local machine. Be sure to first navigate to the desired directory on the local machine.
 
-At this time, [Survey] can take the value of NLA or NSRA.
+```{bash}
+git clone https://github.com/USEPA/NARS_WaterChem_QC_Example
+```
 
-code/
+### Workflow
 
--   [Survey]\_QA*\_*document.qmd: Main code that forms the report
+To view the example data for the workflow, run the code below. Note these data have been anonymized. Preliminary data were used as an example for this QC process; therefore, these data should be used for example purposes only.
 
--   Render_document\_[Survey].r: Code to render the report
+```{r}
+library(readr)
+library(dplyr)
 
--   Render_document\_[Survey]\_example.r: Code to render an example report using example data
+rawData      <- read_tsv("./data/nla22_waterChem.tab"); glimpse(rawData)
 
-reports/[Survey]\_WaterChem_QA_Report_YYYY-MM-DD
+profile_data <- read_tsv("./data/nla2022_profile_wide.tab"); glimpse(profile_data)
 
--   .rds files that are copies of the data used to run the report
+rawData      <- read_tsv("./data/nla22_waterChem.tab"); glimpse(rawData)
 
--   .html: Report file
+```
 
--   .csv: Flagged observation for QA review and further documentation
+To open the code for the QC process and output generation, run the following:
+
+```{r}
+file.edit("code/NLA_QC_document.qmd")
+```
+
+The QC processes is rendered from a second script. Open this script by running the following:
+
+```{r}
+file.edit("code/Render_document_NLA_example.r")
+```
+
+Running the above rendering script will generate an new date-stamped directory in the outputs folder. This directory will contain copies of the data files used to run the script, the HTML output, and the flagged observations for QC review in a comma separated file. To view an example of an output folder, run the following:
+
+```{r}
+list.files("outputs/Example_NLA_Water_Chem_QC_Output_2025-04-25")
+```
+
+#### Access Documents without Code
+
+To acces the files without using code, download a zip file of the repository using the instructions [here](https://docs.github.com/en/get-started/start-your-journey/downloading-files-from-github). The HTML file can be opened in any web browser.
 
 #### Acknowledgments
 
-This process was based on the quality assurance process developed by Alan Herlihy and David Peck. Thanks also to Donald Benkendorf, Lareina Guenzel, Sarah Lehmann, Richard Mitchell, Amanda Nahlik, and Anett Trebitz.
+This process was based on the quality control process developed by Alan Herlihy and David Peck. Thanks also to Donald Benkendorf, Lareina Guenzel, Sarah Lehmann, and Richard Mitchell.
 
 #### Disclaimer
 
