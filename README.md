@@ -2,7 +2,7 @@
 
 An example of the code-assisted process to quality control the National Aquatic Resource Survey (NARS) surface water data inclusive of physical, chemical, and chlorophyll a parameters. Currently, the process used for the National Lakes Assessment is available.
 
-Please cite this code using the following citation: Handler, A., K. Blocksom, A. Herlihy, A. Nahlik and A. Trebitz (2025). Reproducible workflow for performing quality control on National Aquatic Resource Survey water quality data. GitHub, <https://github.com/USEPA/NARS_WaterChem_QC_Example>.
+Please cite this code using the following citation: Handler, A., K. Blocksom, A. Herlihy, A. Trebitz, and A. Nahlik (2025). Reproducible workflow for performing quality control on National Aquatic Resource Survey water quality data. GitHub, <https://github.com/USEPA/NARS_WaterChem_QC_Example>.
 
 #### Contacts
 
@@ -24,7 +24,7 @@ git clone https://github.com/USEPA/NARS_WaterChem_QC_Example
 
 ### Workflow
 
-To view the example data for the workflow, run the code below. Note these data have been anonymized. Preliminary data were used as an example for this QC process; therefore, these data should be used for example purposes only. Variable descriptions can be viewed in the PDF file Dataset_VariableDescriptions.pdf, which is located [here](data/Dataset_VariableDescriptions.pdf). 
+To view the example data for the workflow, run the code below. Note these data have been anonymized. Preliminary data were used as an example for this QC process; therefore, these data should be used for example purposes only. Variable descriptions can be viewed in the PDF file Dataset_VariableDescriptions.pdf, which is located [here](data/Dataset_VariableDescriptions.pdf).
 
 ```{r}
 library(readr)
