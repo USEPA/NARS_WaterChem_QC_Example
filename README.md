@@ -12,11 +12,11 @@ Please cite this code using the following citation: Handler, A., K. Blocksom, A.
 
 #### Project Description
 
-The purpose of this code and resulting report is to provide a code-assisted, reproducible framework for quality controlling the NARS surface water quality data. The data are inclusive of physical and chemical parameters as well as chlorophyll a. Data are evaluated for completeness and consistency while also providing an number of data quality checks. The code includes checks for data completeness based on field logs, consistency in reporting units, consistency in data quality flags, checks for internal chemical validity, and provides a comprehensive set of bivariate plots to aid identifying data quality issues. The code produces a document in HTML format for interactive use and a tabular data file with all observations flagged by the process. The tabular file can be used to provide notes on further investigations and follow-up actions, thus providing a record of the quality control process. Additional background information on water quality validation is provided in the document appendix.
+The purpose of this code and resulting report is to provide a code-assisted, reproducible framework for quality controlling the NARS surface water quality data. The data are inclusive of physical and chemical parameters as well as chlorophyll a. Data are evaluated for completeness and consistency while also providing a number of data quality checks. The code includes checks for data completeness based on field logs, consistency in reporting units, consistency in data quality flags, and internal chemical validity, and provides a comprehensive set of bivariate plots to aid identifying data quality issues. The code produces a document in HTML format for interactive use and a tabular data file with all observations flagged by the process. The tabular file can be used to provide notes on further investigations and follow-up actions, thus providing a record of the quality control process. Additional background information on water quality validation is provided in the document appendix.
 
 ### Clone Repository
 
-Run the following code in terminal to clone the repository to a local machine. Be sure to first navigate to the desired directory on the local machine.
+Run the following code in a command-line window, such as the Terminal pane in RStudio, to clone the repository to a local machine. Be sure to first navigate to the desired parent directory on the local machine.
 
 ```{bash}
 git clone https://github.com/USEPA/NARS_WaterChem_QC_Example
@@ -24,7 +24,7 @@ git clone https://github.com/USEPA/NARS_WaterChem_QC_Example
 
 ### Workflow
 
-To view the example data for the workflow, run the code below. Note these data have been anonymized. Preliminary data were used as an example for this QC process; therefore, these data should be used for example purposes only.
+To view the example data for the workflow, run the code below. Note these data have been anonymized. Preliminary data were used as an example for this QC process; therefore, these data should be used for example purposes only. Variable descriptions can be viewed in the PDF file Dataset_VariableDescriptions.pdf, which is located [here](data/Dataset_VariableDescriptions.pdf). 
 
 ```{r}
 library(readr)
@@ -44,13 +44,13 @@ To open the code for the QC process and output generation, run the following:
 file.edit("code/NLA_QC_document.qmd")
 ```
 
-The QC processes is rendered by running a separate script. Open this script by running the following:
+The QC process is rendered by running a separate script. Open this script by running the following:
 
 ```{r}
 file.edit("code/Render_document_NLA_example.r")
 ```
 
-Running the above rendering script will generate an new date-stamped directory in the outputs folder. This directory will contain copies of the data files used to run the script, the HTML output, and the flagged observations for QC review in a comma separated file. To view a list of the files an example of an output folder, run the following:
+Running the above rendering script will generate an new date-stamped directory in the outputs folder. This directory will contain copies of the data files used to run the script, the HTML output, and the flagged observations for QC review in a comma-separated file. To view a list of the files an example of an output folder, run the following:
 
 ```{r}
 list.files("outputs/Example_NLA_Water_Chem_QC_Output_2025-05-08")
