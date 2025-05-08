@@ -1,6 +1,6 @@
 ---
-title: "National Lakes Assessment 2022 Water Chemistry and Chlorophyll a Validation"
-subtitle: "Protocol and code for evaluating NLA 2022 lab water quality data for completeness, consistency, and quality"
+title: "Example of National Lakes Assessment 2022 Surface Water Data Quality Control"
+subtitle: "Workflow and code for evaluating NLA 2022 lab surface water  data for completeness, consistency, and quality"
 date: "`r Sys.Date()`"
 authors: "Amalia Handler and Karen Blocksom"
 format: 
@@ -33,11 +33,9 @@ National Aquatic Resource Survey (NARS) database are pulled in and
 evaluated for completeness and consistency while also providing an
 initial data quality check. Additional background information and
 graphics for the water quality validation process are provided in the
-Appendix. This script is intended for use once all water chemistry
-samples have been analyzed for the purposes of identifying potential
-outliers or quality issues; however, this script may be used iteratively
-to confirm observations are no longer flagged once data revisions are
-implemented.
+[Appendix](#appendix). This script is intended for use once all water chemistry samples have been analyzed for the purposes of identifying potential outliers or quality issues; however, this script may be used iteratively to confirm observations are no longer flagged once data revisions are implemented.
+
+Individuals using this workflow are expected to have working knowledge of water quality data including chemistry, sample collection, and analytical techniques.
 
 In the sections below, the code identifies observations that are shown
 in the table that are flagged for potential completeness, consistency,
@@ -338,7 +336,7 @@ datatable(missing_check, caption = htmltools::tags$caption("Table 3: Individual 
 
 This section checks that flags are applied consistently based on the
 water chemistry RESULT, method detection limit (MDL), and reporting
-limit (RL). The checks completed in Table 4 include:
+limit (RL). See the [Appendix](#appendix) section about [Flags](#appendix-flags) to see the definitions to current and historical flags used in NARS. The checks completed in Table 4 include:
 
 1.  RESULT value is less than the MDL but RESULT is not missing.
 
@@ -1028,7 +1026,7 @@ for(i in 1:6){
 }
 ```
 
-## Appendix
+## Appendix {#appendix}
 
 ### Background
 
@@ -1065,7 +1063,7 @@ to be "dissolved".
 Assessment. Source: Figure 10.1 in the 2022 NLA Laboratory Operations
 Manual.](images/NLA%202022%20LOM%20Water%20Chem%20Sample%20Workflow%20Diagram.png)](https://www.epa.gov/system/files/documents/2022-07/LOM%20NLA%202022%20Version1.1_220519_0.pdf)
 
-#### Flags
+#### Flags {#appendix-flags}
 
 Data flags have always been used and associated with the EMAP or NARS
 lab water chemistry data:

@@ -1,4 +1,4 @@
-# National Aquatic Resource Survey Framework for Surface Water Data Quality Control
+# National Aquatic Resource Survey Workflow for Surface Water Data Quality Control
 
 An example of the code-assisted process to quality control the National Aquatic Resource Survey (NARS) surface water data inclusive of physical, chemical, and chlorophyll a parameters. Currently, the process used for the National Lakes Assessment is available.
 
